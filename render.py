@@ -157,6 +157,8 @@ def _trail_signature(
         xy = body.trail_xy
         n = len(xy)
         h.update(f"{name}|step:{body.trail_step_minutes}|n:{n}|cn:{len(body_kin.segment_colors)}|".encode("ascii"))
+        px, py = body.position_xy
+        h.update(f"p:{px:.6f},{py:.6f}|".encode("ascii"))
         if n:
             x0, y0 = xy[0]
             x1, y1 = xy[-1]
@@ -264,6 +266,17 @@ def _render_trail_layers(
                 fill=colors[i],
                 width=line_width,
             )
+
+        # Bridge the gap from the last step-aligned trail sample to the exact
+        # current marker position.
+        if trail_xy and colors:
+            tail = trail_xy[-1]
+            head = body.position_xy
+            d.line(
+                (tail[0] * ssaa_scale, tail[1] * ssaa_scale, head[0] * ssaa_scale, head[1] * ssaa_scale),
+                fill=colors[-1],
+                width=line_width,
+            )
         trail_image = ImageChops.add(trail_image, body_layer)
 
     return trail_image
@@ -338,10 +351,10 @@ def _infer_projection_scale(projected: dict[str, ProjectedBody]) -> float:
 
     for name in config.BODIES:
         body = projected.get(name)
-        if body is None or not body.trail_au:
+        if body is None:
             continue
 
-        x_au, y_au, z_au = body.trail_au[-1]
+        x_au, y_au, z_au = body.position_au
         vx, vy = _to_visual_xy_au_for_scale(x_au, y_au, z_au)
         x_px, y_px = body.position_xy
 
@@ -444,7 +457,10 @@ def _draw_markers(
         else:
             body_kin = kin_bundle.by_body.get(name)
             if body_kin is not None and body_kin.segment_colors:
-                marker_color = _revalue_rgb(body_kin.segment_colors[-1], body_cfg.brightness)
+                # Keep marker tint close to recent trail color, but not identical
+                # to the newest segment so the final segment remains distinguishable.
+                color_idx = -2 if len(body_kin.segment_colors) >= 2 else -1
+                marker_color = _revalue_rgb(body_kin.segment_colors[color_idx], body_cfg.brightness)
             else:
                 b = body_cfg.brightness
                 marker_color = (b, b, b)

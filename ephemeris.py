@@ -291,6 +291,7 @@ def get_body_states(at_time: datetime) -> dict[str, BodyState]:
         if body_cfg.target.lower() == center_target:
             cache_bodies.pop(name, None)
             trail = [np.zeros(3, dtype=float) for _ in range(sample_count)]
+            position_vec = np.zeros(3, dtype=float)
         else:
             aligned_now = _align_time_to_step(utc_time, step_minutes)
             trail = _build_or_update_trail(
@@ -305,19 +306,17 @@ def get_body_states(at_time: datetime) -> dict[str, BodyState]:
             )
 
             # Keep cache alignment for history, but force the tail sample to exact render time.
-            # This guarantees trail[-1] is always the current position.
+            # Use exact render-time position for marker placement without mutating
+            # step-aligned trail samples (which keeps segment kinematics/colors stable).
             current_vec = _compute_relative_trail_vectors(
                 body_cfg.target,
                 center_target,
                 kernel,
                 [utc_time],
             )[0]
-            if trail:
-                trail[-1] = current_vec
-            else:
-                trail = [current_vec]
+            position_vec = current_vec
         states[name] = BodyState(
-            position_au=trail[-1],
+            position_au=position_vec,
             trail_au=trail,
             trail_step_minutes=step_minutes,
         )

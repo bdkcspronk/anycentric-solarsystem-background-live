@@ -9,6 +9,7 @@ from ephemeris import BodyState
 
 @dataclass(frozen=True)
 class ProjectedBody:
+    position_au: tuple[float, float, float]
     position_xy: tuple[float, float]
     trail_xy: list[tuple[float, float]]
     trail_au: list[tuple[float, float, float]]
@@ -114,13 +115,20 @@ def project_states(states: dict[str, BodyState]) -> dict[str, ProjectedBody]:
     scale = _compute_projection_scale(states)
     projected: dict[str, ProjectedBody] = {}
     for name, body in states.items():
+        position_au = (
+            float(body.position_au[0]),
+            float(body.position_au[1]),
+            float(body.position_au[2]),
+        )
+        position_xy = _project_au_to_px(position_au[0], position_au[1], position_au[2], name, scale)
         trail_xy = [
             _project_au_to_px(float(v[0]), float(v[1]), float(v[2]), name, scale)
             for v in body.trail_au
         ]
         trail_au = [(float(v[0]), float(v[1]), float(v[2])) for v in body.trail_au]
         projected[name] = ProjectedBody(
-            position_xy=trail_xy[-1],
+            position_au=position_au,
+            position_xy=position_xy,
             trail_xy=trail_xy,
             trail_au=trail_au,
             trail_step_minutes=body.trail_step_minutes,
