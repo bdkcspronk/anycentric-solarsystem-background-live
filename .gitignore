@@ -1,0 +1,27 @@
+# Python environment and bytecode
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local editor settings
+.vscode/
+
+# Generated image output
+geocentric.png
+
+# Runtime/cache artifacts
+trail_cache.json
+trail_kinematics_cache/
+trail_layer_cache.json
+trail_layer_cache.png
+render_overlay_state.json
+wallpaper_cycle_state.json
+
+# Temp files
+*.tmp
+
+# Local scheduler/runtime config
+wallpaper_scheduler_config.json
+
+# Build artifacts
+build/
