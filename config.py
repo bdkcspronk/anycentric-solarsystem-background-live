@@ -212,23 +212,22 @@ def _build_all_bodies() -> dict[str, BodyConfig]:
 # Bodies to include in render order
 ALL_BODIES: dict[str, BodyConfig] = _build_all_bodies()
 
-INNER_PLANET_TARGETS = {"moon", "sun", "mercury", "venus", "earth", "mars"}
-PLANET_TARGETS = {"moon", "sun", "mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune"}
+INNER_PLANET_TARGETS = {"mercury", "venus", "earth", "mars"}
+PLANET_TARGETS = {"mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune"}
 OUTER_PLANET_TARGETS = {"jupiter", "saturn", "uranus", "neptune"}
 DWARF_PLANET_TARGETS = {"ceres", "pluto", "eris", "haumea", "makemake", "gonggong", "quaoar"}
 MAJOR_PLANET_TARGETS = {"mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune"}
-
+ALL_PLANETS_TARGETS = PLANET_TARGETS | DWARF_PLANET_TARGETS
 
 def _selector_set(key: str) -> set[str]:
     token = "".join(ch for ch in str(key).lower() if ch.isalnum())
     selectors: dict[str, set[str]] = {
         "all": set(ALL_BODIES.keys()),
         "bodies": set(ALL_BODIES.keys()),
-        "sun": {"sun"},
-        "moon": {"moon"},
         "planets": set(MAJOR_PLANET_TARGETS),
+        "allplanets": set(ALL_PLANETS_TARGETS),
         "majorplanets": set(MAJOR_PLANET_TARGETS),
-        "innerplanets": {"mercury", "venus", "earth", "mars"},
+        "innerplanets": set(INNER_PLANET_TARGETS),
         "outerplanets": set(OUTER_PLANET_TARGETS),
         "dwarfplanets": set(DWARF_PLANET_TARGETS),
     }
@@ -289,7 +288,7 @@ def _select_bodies() -> dict[str, BodyConfig]:
     else:
         selected_names = set(ALL_BODIES.keys())
 
-    # Keep Sun as a fixed reference in every mode.
+    # include the sun always
     selected_names.add("sun")
     # Always include the current center body so relative frame remains valid.
     selected_names.add(str(OBSERVER_CENTER_BODY).strip().lower())

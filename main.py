@@ -135,7 +135,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=1920, help="Output image width")
     parser.add_argument("--height", type=int, default=1080, help="Output image height")
     parser.add_argument("--yaw", type=float, default=0.0, help="View yaw in degrees")
-    parser.add_argument("--pitch", type=float, default=45.0, help="View pitch in degrees")
+    parser.add_argument("--pitch", type=float, default=0.0, help="View pitch in degrees")
     parser.add_argument("--roll", type=float, default=0.0, help="View roll in degrees")
     parser.add_argument("--ssaa", type=int, default=4, help="SSAA scale")
     parser.add_argument("--celestial-scale", type=_parse_bool, default=False, help="Enable or disable celestial guide circles (True/False)",)
@@ -147,7 +147,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--orbit-radius-mode", type=str, default='power', help="Orbit radius remap mode: linear, sqrt, log, power",)
     parser.add_argument("--orbit-radius-power", type=float, default=0.5, help="Exponent used when orbit radius mode is power",)
     parser.add_argument("--center-body", type=str, default="venus", help="Observer center body key (e.g. earth, sun, moon, mars)",)
-    parser.add_argument("--selection", type=str, default='inner planets', help="Body selection expression. Examples: 'planets AND moon', 'dwarf planets AND outer planets'. Sun is always included.",)
+    parser.add_argument("--selection", type=str, default='innerplanets', help="Body selection expression. Examples: 'planets AND moon', 'dwarf planets AND outer planets'. Sun is always included.",)
     return parser.parse_args()
 
 

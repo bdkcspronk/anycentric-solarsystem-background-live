@@ -282,10 +282,21 @@ Arguments:
 	- Type: string array
 	- Default: uses `main_args` from the selected config file
 	- Effect: forwards explicit arguments directly to `main.py` and overrides config-file `main_args`
+	- Custom wrapper flags (via `-MainArgs`) for per-update rotation:
+		- `--RotateZ=<deg>`: add `<deg>` to yaw each run
+		- `--RotateX=<deg>`: add `<deg>` to pitch each run
+		- `--RotateY=<deg>`: add `<deg>` to roll each run
+		- `--Rotate` (or `-Rotate`): random yaw/pitch/roll each run
 - `-VerboseLog`
 	- Type: switch
 	- Default: `False`
 	- Effect: prints Python path, script path, and forwarded args
+	- Also reports cycle-cache hits/misses when cycle mode is enabled
+
+Cycle cache behavior (automatic in `run_wallpaper.ps1`):
+	- Active only when center-body cycle is enabled and rotation flags are not used
+	- Stores one cached image per cycled center body in `wallpaper_cycle_cache/`
+	- Reuses cached image when the exact forwarded args signature matches for that body
 
 ### 3) `setup_wallpaper_scheduler.ps1` arguments
 
@@ -306,10 +317,19 @@ Arguments:
 	- Default: `6`
 	- Allowed range: `1` to `168`
 	- Effect: repeat interval for automatic runs
+- `-IntervalMinutes`
+	- Type: integer
+	- Default: `0` (disabled)
+	- Allowed range: `0` to `10080` (minutes)
+	- Effect: repeat interval in minutes when provided; overrides `-IntervalHours`
 - `-MainArgs`
 	- Type: string array
 	- Default: empty array
 	- Effect: arguments forwarded to `main.py` when task runs
+- `-NoCycle`
+	- Type: switch
+	- Default: `False`
+	- Effect: disable automatic center-body cycling and keep a plain interval-based refresh
 - `-Uninstall`
 	- Type: switch
 	- Default: `False`
@@ -328,7 +348,7 @@ If you run setup with no extra tuning beyond interval and task name:
 - Labels: off
 - Camera rotation: yaw `0.0`, pitch `0.0`, roll `0.0`
 - Anti-aliasing: SSAA scale `4`
-- Scheduler interval: every `6` hours
+- Scheduler interval: every `6` hours (or specify minutes with `-IntervalMinutes`)
 - Scheduler mode: hidden/windowless using `wscript.exe` + `run_wallpaper_hidden.vbs`
 
 ## Editing `config.py` (Advanced Tuning)

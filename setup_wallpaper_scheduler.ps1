@@ -3,8 +3,11 @@ param(
     [string]$TaskName = "SolarWallpaperAutoUpdate",
     [ValidateRange(1, 168)]
     [int]$IntervalHours = 1,
+    [ValidateRange(0, 10080)]
+    [int]$IntervalMinutes = 0,
     [string[]]$MainArgs = @(),
     [string[]]$SelectionCycle = @(),
+    [switch]$NoCycle,
     [switch]$Uninstall,
     [switch]$RunNow
 )
@@ -54,19 +57,29 @@ if ($Uninstall) {
 }
 
 $config = [ordered]@{
-    interval_hours = $IntervalHours
     main_args = $MainArgs
+}
+
+# Prefer explicit minutes when provided, otherwise fall back to hours.
+if ($IntervalMinutes -gt 0) {
+    $config.interval_minutes = $IntervalMinutes
+} else {
+    $config.interval_hours = $IntervalHours
 }
 
 if ($SelectionCycle.Count -gt 0) {
     $config.selection_cycle = $SelectionCycle
 }
 
+# Cycle enabled unless user passed -NoCycle
+$cycleEnabled = -not [bool]$NoCycle
+$config.cycle_enabled = $cycleEnabled
+
 if ($PSCmdlet.ShouldProcess($configPath, "Write scheduler config")) {
     $config | ConvertTo-Json -Depth 5 | Set-Content -Path $configPath -Encoding UTF8
 }
 
-$interval = New-TimeSpan -Hours $IntervalHours
+$interval = if ($IntervalMinutes -gt 0) { New-TimeSpan -Minutes $IntervalMinutes } else { New-TimeSpan -Hours $IntervalHours }
 $duration = New-TimeSpan -Days 3650
 $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
 $triggerRepeat = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval $interval -RepetitionDuration $duration
@@ -89,13 +102,18 @@ if ($PSCmdlet.ShouldProcess($TaskName, "Register/Update scheduled task")) {
         -ErrorAction Stop | Out-Null
 
     Write-Host "Scheduled task '$TaskName' is active."
-    Write-Host "Interval: every $IntervalHours hour(s)."
+    if ($IntervalMinutes -gt 0) {
+        Write-Host "Interval: every $IntervalMinutes minute(s)."
+    } else {
+        Write-Host "Interval: every $IntervalHours hour(s)."
+    }
     if ($MainArgs.Count -gt 0) {
         Write-Host "main.py args: $($MainArgs -join ' ')"
     }
     if ($SelectionCycle.Count -gt 0) {
         Write-Host "selection cycle: $($SelectionCycle -join ' | ')"
     }
+    Write-Host "cycle enabled: $cycleEnabled"
 }
 
 if ($RunNow) {

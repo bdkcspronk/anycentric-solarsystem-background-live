@@ -16,6 +16,8 @@ trail_layer_cache.json
 trail_layer_cache.png
 render_overlay_state.json
 wallpaper_cycle_state.json
+wallpaper_rotation_state.json
+wallpaper_cycle_cache/
 
 # Temp files
 *.tmp

@@ -11,6 +11,8 @@ if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $scriptDir "wallpaper_scheduler_config.json"
 }
 $cycleStatePath = Join-Path $scriptDir "wallpaper_cycle_state.json"
+$rotationStatePath = Join-Path $scriptDir "wallpaper_rotation_state.json"
+$cycleCacheDir = Join-Path $scriptDir "wallpaper_cycle_cache"
 
 $pythonExe = Join-Path $scriptDir ".venv\Scripts\python.exe"
 $mainPy = Join-Path $scriptDir "main.py"
@@ -23,16 +25,32 @@ if (-not (Test-Path $mainPy)) {
 }
 
 $forwardArgs = @()
+$cycleEnabled = $true
 if (Test-Path $ConfigPath) {
     $cfg = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
     if ($null -ne $cfg.main_args) {
         $forwardArgs = @($cfg.main_args)
+    }
+    if ($null -ne $cfg.cycle_enabled) {
+        $cycleEnabled = [bool]$cfg.cycle_enabled
     }
 }
 
 if ($null -ne $MainArgs -and $MainArgs.Count -gt 0) {
     $forwardArgs = @($MainArgs)
 }
+
+# Support shorthand single-dash custom rotate flags in MainArgs, e.g. -Rotate.
+$normalizedArgs = @()
+for ($i = 0; $i -lt $forwardArgs.Count; $i++) {
+    $a = [string]$forwardArgs[$i]
+    if ($a -match "^(?i)-Rotate(?:X|Y|Z)?(?:=|$)") {
+        $normalizedArgs += ("-" + $a)
+    } else {
+        $normalizedArgs += $a
+    }
+}
+$forwardArgs = @($normalizedArgs)
 
 function Test-HasArg {
     param(
@@ -62,7 +80,10 @@ function Get-ArgValue {
         }
         if ($a.Equals("--$Name", [System.StringComparison]::OrdinalIgnoreCase)) {
             if (($i + 1) -lt $ArgList.Count) {
-                return [string]$ArgList[$i + 1]
+                $next = [string]$ArgList[$i + 1]
+                if (-not $next.StartsWith("--", [System.StringComparison]::Ordinal)) {
+                    return $next
+                }
             }
             return ""
         }
@@ -96,7 +117,13 @@ function Set-ArgValue {
                 $result += "$Value"
                 $found = $true
             }
-            $i += 2
+            $i += 1
+            if ($i -lt $ArgList.Count) {
+                $next = [string]$ArgList[$i]
+                if (-not $next.StartsWith("--", [System.StringComparison]::Ordinal)) {
+                    $i += 1
+                }
+            }
             continue
         }
         $result += $a
@@ -124,7 +151,13 @@ function Remove-Arg {
             continue
         }
         if ($a.Equals("--$Name", [System.StringComparison]::OrdinalIgnoreCase)) {
-            $i += 2
+            $i += 1
+            if ($i -lt $ArgList.Count) {
+                $next = [string]$ArgList[$i]
+                if (-not $next.StartsWith("--", [System.StringComparison]::Ordinal)) {
+                    $i += 1
+                }
+            }
             continue
         }
         $result += $a
@@ -206,8 +239,88 @@ function Get-NextCycledBody {
     return $body
 }
 
+function Parse-DoubleOrThrow {
+    param(
+        [string]$Value,
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return 0.0
+    }
+
+    $num = 0.0
+    if ([double]::TryParse($Value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$num)) {
+        return $num
+    }
+    throw "Invalid numeric value for --${Name}: '$Value'"
+}
+
+function Wrap-Degrees {
+    param([double]$Angle)
+    $wrapped = $Angle % 360.0
+    if ($wrapped -lt 0.0) {
+        $wrapped += 360.0
+    }
+    return $wrapped
+}
+
+function Get-RotationState {
+    param(
+        [string]$StatePath,
+        [double]$DefaultYaw,
+        [double]$DefaultPitch,
+        [double]$DefaultRoll
+    )
+
+    $state = @{
+        yaw = Wrap-Degrees -Angle $DefaultYaw
+        pitch = Wrap-Degrees -Angle $DefaultPitch
+        roll = Wrap-Degrees -Angle $DefaultRoll
+    }
+
+    if (Test-Path $StatePath) {
+        try {
+            $loaded = Get-Content -Raw -Path $StatePath | ConvertFrom-Json
+            if ($null -ne $loaded.yaw) { $state.yaw = Wrap-Degrees -Angle ([double]$loaded.yaw) }
+            if ($null -ne $loaded.pitch) { $state.pitch = Wrap-Degrees -Angle ([double]$loaded.pitch) }
+            if ($null -ne $loaded.roll) { $state.roll = Wrap-Degrees -Angle ([double]$loaded.roll) }
+        } catch {
+            # Keep defaults when state file is missing or invalid.
+        }
+    }
+
+    return $state
+}
+
+function Save-RotationState {
+    param(
+        [string]$StatePath,
+        [double]$Yaw,
+        [double]$Pitch,
+        [double]$Roll
+    )
+
+    @{
+        yaw = Wrap-Degrees -Angle $Yaw
+        pitch = Wrap-Degrees -Angle $Pitch
+        roll = Wrap-Degrees -Angle $Roll
+    } | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8
+}
+
+function Get-ArgsSignature {
+    param([string[]]$ArgList)
+    return (($ArgList | ForEach-Object { [string]$_ }) -join "`n")
+}
+
+function Get-BodyCacheSlug {
+    param([string]$BodyName)
+    $text = if ($null -eq $BodyName) { "" } else { $BodyName }
+    return ($text.ToLowerInvariant() -replace "[^a-z0-9_-]", "_")
+}
+
 # Cycle center body inside the effective selection unless center body is explicitly provided.
-if (-not (Test-HasArg -ArgList $forwardArgs -Name "center-body")) {
+if ($cycleEnabled -and -not (Test-HasArg -ArgList $forwardArgs -Name "center-body")) {
     $selectionExpr = Get-ArgValue -ArgList $forwardArgs -Name "selection"
     if ([string]::IsNullOrWhiteSpace($selectionExpr)) {
         $selectionExpr = "inner planets"
@@ -223,10 +336,70 @@ if (-not (Test-HasArg -ArgList $forwardArgs -Name "center-body")) {
         if ($nextBody.Equals("sun", [System.StringComparison]::OrdinalIgnoreCase)) {
             # main.py requires center body to be explicitly included by selection expression.
             $selectionWithSun = "($selectionExpr) OR sun"
-            $forwardArgs = Remove-Arg -ArgList $forwardArgs -Name "selection"
+            $forwardArgs = @(Remove-Arg -ArgList $forwardArgs -Name "selection")
             $forwardArgs = @($forwardArgs + @("--selection", $selectionWithSun))
         }
         $forwardArgs = @($forwardArgs + @("--center-body=$nextBody"))
+    }
+}
+
+$rotateZStep = Parse-DoubleOrThrow -Value (Get-ArgValue -ArgList $forwardArgs -Name "RotateZ") -Name "RotateZ"
+$rotateYStep = Parse-DoubleOrThrow -Value (Get-ArgValue -ArgList $forwardArgs -Name "RotateY") -Name "RotateY"
+$rotateXStep = Parse-DoubleOrThrow -Value (Get-ArgValue -ArgList $forwardArgs -Name "RotateX") -Name "RotateX"
+$rotateRandom = Test-HasArg -ArgList $forwardArgs -Name "Rotate"
+
+$forwardArgs = @(Remove-Arg -ArgList $forwardArgs -Name "RotateZ")
+$forwardArgs = @(Remove-Arg -ArgList $forwardArgs -Name "RotateY")
+$forwardArgs = @(Remove-Arg -ArgList $forwardArgs -Name "RotateX")
+$forwardArgs = @(Remove-Arg -ArgList $forwardArgs -Name "Rotate")
+
+$hasRotateStep = ($rotateZStep -ne 0.0) -or ($rotateYStep -ne 0.0) -or ($rotateXStep -ne 0.0)
+if ($rotateRandom -or $hasRotateStep) {
+    $baseYaw = Parse-DoubleOrThrow -Value (Get-ArgValue -ArgList $forwardArgs -Name "yaw") -Name "yaw"
+    $basePitch = Parse-DoubleOrThrow -Value (Get-ArgValue -ArgList $forwardArgs -Name "pitch") -Name "pitch"
+    $baseRoll = Parse-DoubleOrThrow -Value (Get-ArgValue -ArgList $forwardArgs -Name "roll") -Name "roll"
+    $rotation = Get-RotationState -StatePath $rotationStatePath -DefaultYaw $baseYaw -DefaultPitch $basePitch -DefaultRoll $baseRoll
+
+    if ($rotateRandom) {
+        $rotation.yaw = Get-Random -Minimum 0.0 -Maximum 360.0
+        $rotation.pitch = Get-Random -Minimum 0.0 -Maximum 360.0
+        $rotation.roll = Get-Random -Minimum 0.0 -Maximum 360.0
+    } else {
+        # Axis mapping follows the existing renderer conventions:
+        # yaw=z, pitch=x, roll=y.
+        $rotation.yaw = Wrap-Degrees -Angle ($rotation.yaw + $rotateZStep)
+        $rotation.pitch = Wrap-Degrees -Angle ($rotation.pitch + $rotateXStep)
+        $rotation.roll = Wrap-Degrees -Angle ($rotation.roll + $rotateYStep)
+    }
+
+    $forwardArgs = @(Set-ArgValue -ArgList $forwardArgs -Name "yaw" -Value ([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:0.######}", $rotation.yaw)))
+    $forwardArgs = @(Set-ArgValue -ArgList $forwardArgs -Name "pitch" -Value ([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:0.######}", $rotation.pitch)))
+    $forwardArgs = @(Set-ArgValue -ArgList $forwardArgs -Name "roll" -Value ([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:0.######}", $rotation.roll)))
+    Save-RotationState -StatePath $rotationStatePath -Yaw $rotation.yaw -Pitch $rotation.pitch -Roll $rotation.roll
+}
+
+$effectiveCenterBody = Get-ArgValue -ArgList $forwardArgs -Name "center-body"
+$cycleCacheEnabled = $cycleEnabled -and -not $rotateRandom -and -not $hasRotateStep -and -not [string]::IsNullOrWhiteSpace($effectiveCenterBody)
+$cacheHitImagePath = $null
+$cacheImagePath = $null
+$cacheMetaPath = $null
+$argsSignature = ""
+
+if ($cycleCacheEnabled) {
+    $argsSignature = Get-ArgsSignature -ArgList $forwardArgs
+    $bodySlug = Get-BodyCacheSlug -BodyName $effectiveCenterBody
+    $cacheImagePath = Join-Path $cycleCacheDir ("{0}.png" -f $bodySlug)
+    $cacheMetaPath = Join-Path $cycleCacheDir ("{0}.json" -f $bodySlug)
+
+    if ((Test-Path $cacheImagePath) -and (Test-Path $cacheMetaPath)) {
+        try {
+            $cacheMeta = Get-Content -Raw -Path $cacheMetaPath | ConvertFrom-Json
+            if ($null -ne $cacheMeta.signature -and [string]$cacheMeta.signature -eq $argsSignature) {
+                $cacheHitImagePath = $cacheImagePath
+            }
+        } catch {
+            $cacheHitImagePath = $null
+        }
     }
 }
 
@@ -234,14 +407,48 @@ if ($VerboseLog) {
     Write-Host "Running wallpaper generation..."
     Write-Host "Python: $pythonExe"
     Write-Host "Script: $mainPy"
+    Write-Host "Cycle enabled: $cycleEnabled"
+    if ($rotateRandom) {
+        Write-Host "Rotation mode: random"
+    } elseif ($hasRotateStep) {
+        Write-Host "Rotation step: Z(yaw)=$rotateZStep Y(roll)=$rotateYStep X(pitch)=$rotateXStep"
+    }
+    if ($cycleCacheEnabled) {
+        if ($null -ne $cacheHitImagePath) {
+            Write-Host "Cycle cache: hit for center-body '$effectiveCenterBody'"
+        } else {
+            Write-Host "Cycle cache: miss for center-body '$effectiveCenterBody'"
+        }
+    }
     if ($forwardArgs.Count -gt 0) {
         Write-Host "Args: $($forwardArgs -join ' ')"
     }
 }
 
-& $pythonExe $mainPy @forwardArgs
-if ($LASTEXITCODE -ne 0) {
-    throw "main.py failed with exit code $LASTEXITCODE"
+$imagePath = Join-Path $scriptDir "geocentric.png"
+if ($null -eq $cacheHitImagePath) {
+    & $pythonExe $mainPy @forwardArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "main.py failed with exit code $LASTEXITCODE"
+    }
+
+    if ($cycleCacheEnabled -and -not [string]::IsNullOrWhiteSpace($cacheImagePath) -and -not [string]::IsNullOrWhiteSpace($cacheMetaPath)) {
+        if (-not (Test-Path $cycleCacheDir)) {
+            New-Item -Path $cycleCacheDir -ItemType Directory -Force | Out-Null
+        }
+        Copy-Item -Path $imagePath -Destination $cacheImagePath -Force
+        @{
+            center_body = $effectiveCenterBody
+            signature = $argsSignature
+            updated_utc = (Get-Date).ToUniversalTime().ToString("o")
+        } | ConvertTo-Json | Set-Content -Path $cacheMetaPath -Encoding UTF8
+
+        # Set wallpaper from the cache file so the active image always matches cache content.
+        $imagePath = $cacheImagePath
+    }
+} else {
+    # Cached image already matches the exact forwarded arguments.
+    $imagePath = $cacheHitImagePath
 }
 
 $setter = Join-Path $scriptDir "set_geocentric_wallpaper.ps1"
@@ -249,5 +456,4 @@ if (-not (Test-Path $setter)) {
     throw "Wallpaper setter not found: $setter"
 }
 
-$imagePath = Join-Path $scriptDir "geocentric.png"
 & $setter -ImagePath $imagePath
