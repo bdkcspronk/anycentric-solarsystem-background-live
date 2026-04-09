@@ -1,6 +1,9 @@
+"""Projection pipeline from AU coordinates to on-screen positions."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import math
 
 import config
@@ -17,23 +20,45 @@ class ProjectedBody:
 
 
 def _rotate_view(x: float, y: float, z: float) -> tuple[float, float, float]:
-    yaw = math.radians(config.VIEW_YAW_DEG)
-    pitch = math.radians(config.VIEW_PITCH_DEG)
-    roll = math.radians(config.VIEW_ROLL_DEG)
+    m = _rotation_matrix(config.VIEW_YAW_DEG, config.VIEW_PITCH_DEG, config.VIEW_ROLL_DEG)
+    return (
+        m[0] * x + m[1] * y + m[2] * z,
+        m[3] * x + m[4] * y + m[5] * z,
+        m[6] * x + m[7] * y + m[8] * z,
+    )
+
+
+@lru_cache(maxsize=64)
+def _rotation_matrix(yaw_deg: float, pitch_deg: float, roll_deg: float) -> tuple[float, float, float, float, float, float, float, float, float]:
+    """Return composed yaw/pitch/roll matrix matching legacy rotation order.
+
+    Order is yaw(z) -> pitch(x) -> roll(y), equivalent to the original
+    sequential scalar rotation implementation.
+    """
+
+    yaw = math.radians(float(yaw_deg))
+    pitch = math.radians(float(pitch_deg))
+    roll = math.radians(float(roll_deg))
 
     cy = math.cos(yaw)
     sy = math.sin(yaw)
-    x, y = (cy * x - sy * y, sy * x + cy * y)
-
     cp = math.cos(pitch)
     sp = math.sin(pitch)
-    y, z = (cp * y - sp * z, sp * y + cp * z)
-
     cr = math.cos(roll)
     sr = math.sin(roll)
-    x, z = (cr * x + sr * z, -sr * x + cr * z)
 
-    return (x, y, z)
+    # R = Ry(roll) * Rx(pitch) * Rz(yaw)
+    return (
+        cr * cy + sr * sp * sy,
+        -cr * sy + sr * sp * cy,
+        sr * cp,
+        cp * sy,
+        cp * cy,
+        -sp,
+        -sr * cy + cr * sp * sy,
+        sr * sy + cr * sp * cy,
+        cr * cp,
+    )
 
 
 def _to_visual_xy_au(x_au: float, y_au: float, z_au: float, body_name: str) -> tuple[float, float]:

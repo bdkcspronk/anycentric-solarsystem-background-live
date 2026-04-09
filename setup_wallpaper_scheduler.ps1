@@ -14,28 +14,39 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Normalize-ArgumentArray {
+    param([string[]]$InputArgs)
+
+    if ($null -eq $InputArgs) {
+        return ,@()
+    }
+
+    # Normalize cases where MainArgs is passed as one combined token like
+    # "'--pitch','70'" (can happen depending on caller shell quoting).
+    if ($InputArgs.Count -eq 1 -and $InputArgs[0] -like "*,*") {
+        $raw = $InputArgs[0]
+        $parts = $raw -split ","
+        $normalized = @()
+        foreach ($p in $parts) {
+            $v = $p.Trim().Trim("'", '"')
+            if (-not [string]::IsNullOrWhiteSpace($v)) {
+                $normalized += $v
+            }
+        }
+        if ($normalized.Count -gt 0) {
+            return ,$normalized
+        }
+    }
+
+    return ,$InputArgs
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $runnerPath = Join-Path $scriptDir "run_wallpaper.ps1"
 $hiddenRunnerPath = Join-Path $scriptDir "run_wallpaper_hidden.vbs"
 $configPath = Join-Path $scriptDir "wallpaper_scheduler_config.json"
 
-# Normalize cases where MainArgs is passed as one combined token like
-# "'--pitch','70'" (can happen depending on caller shell quoting).
-if ($MainArgs.Count -eq 1 -and $MainArgs[0] -like "*,*") {
-    $raw = $MainArgs[0]
-    $parts = $raw -split ","
-    $normalized = @()
-    foreach ($p in $parts) {
-        $v = $p.Trim()
-        $v = $v.Trim("'", '"')
-        if (-not [string]::IsNullOrWhiteSpace($v)) {
-            $normalized += $v
-        }
-    }
-    if ($normalized.Count -gt 0) {
-        $MainArgs = $normalized
-    }
-}
+$MainArgs = Normalize-ArgumentArray -InputArgs $MainArgs
 
 if (-not (Test-Path $runnerPath)) {
     throw "Runner script not found: $runnerPath"

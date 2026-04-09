@@ -1,26 +1,42 @@
+"""Runtime configuration for the geocentric wallpaper renderer.
+
+This module intentionally exposes mutable globals because the CLI/runtime wrappers
+override settings dynamically before each render.
+"""
+
 from dataclasses import dataclass
+from pathlib import Path
+import json
+import math
 
 @dataclass(frozen=True)
 class BodyConfig:
     target: str
     marker_radius_px: int
-    brightness: int
+    brightness: float
     trail_step_minutes: int | None = None
 
 
+# Project paths
+BASE_DIR = Path(__file__).resolve().parent
+# Support both layouts:
+# - root deployment (this file in project root)
+# - staged deployment (this file in optimized_rewrite/ under project root)
+# Do not key this decision off de440s.bsp existence; on first run the file may
+# be missing and should still download into the correct project folder.
+PROJECT_ROOT = BASE_DIR.parent if BASE_DIR.name.lower() == "optimized_rewrite" else BASE_DIR
+
 # Output settings
-OUTPUT_PATH = "geocentric.png"
+OUTPUT_PATH = str(PROJECT_ROOT / "geocentric.png")
 IMAGE_WIDTH = 1920
 IMAGE_HEIGHT = 1080
 
 # Scene and style settings
 BACKGROUND_BRIGHTNESS = 1
 SUN_RADIUS_PX = 12
-SUN_BRIGHTNESS = 255
 
 # Per-body trail width scale. Actual width uses sqrt(marker_radius_px) * this value.
 TRAIL_LINE_WIDTH_PX = 2
-TRAIL_BASE_BRIGHTNESS = 256
 TRAIL_MIN_FADE = 0.0
 TRAIL_FADE_POWER = 1.0
 TRAIL_DYNAMIC_SATURATION = True
@@ -31,6 +47,7 @@ TRAIL_SATURATION_ANGULAR_BLEND = 0.0
 TRAIL_BRIGHTNESS_ANGULAR_BLEND = 0.0
 
 SHOW_BODY_LABELS = False
+SHOW_MARKER_GLOW = True
 TEXT_SCALE = 3.0
 LABEL_OFFSET_RADIUS_MULTIPLIER = 3.0
 SHOW_CELESTIAL_SCALE = True
@@ -88,11 +105,10 @@ BODY_DISTANCE_MULTIPLIERS: dict[str, float] = {
 }
 
 # Ephemeris and trail sampling settings
-EPHEMERIS_KERNEL = "de440s.bsp"
+EPHEMERIS_KERNEL = str(PROJECT_ROOT / "de440s.bsp")
 
 TRAIL_STEP_SCALE = 2
 TRAIL_BASE_RESOLUTION_FACTOR = 6
-
 
 def _current_center_solar_year_factor() -> float:
     key = str(OBSERVER_CENTER_BODY).strip().lower()
@@ -173,7 +189,7 @@ TRAIL_STEP_BODY_MULTIPLIERS: dict[str, int] = {
     "saturn": 8,
     "uranus": 16,
     "neptune": 32,
-    "ceres": 32,
+    "ceres": 2,
     "pluto": 32,
     "eris": 32,
     "haumea": 32,
@@ -182,30 +198,98 @@ TRAIL_STEP_BODY_MULTIPLIERS: dict[str, int] = {
     "quaoar": 32,
 }
 
+# Per-body glow strength source (0..1). This is intended to use the
+# normalized (non-gamma) brightness when available.
+BODY_GLOW_BRIGHTNESS: dict[str, float] = {}
+
 
 def _scaled_trail_step_minutes(multiplier: int) -> int:
     return max(1, int(round(TRAIL_STEP_MINUTES * int(multiplier))))
 
 
 def _build_all_bodies() -> dict[str, BodyConfig]:
+    defaults: dict[str, float] = {
+        "sun": 1,
+        "moon": 210 / 255.0,
+        "mercury": 180 / 255.0,
+        "venus": 190 / 255.0,
+        "earth": 220 / 255.0,
+        "mars": 185 / 255.0,
+        "jupiter": 230 / 255.0,
+        "saturn": 215 / 255.0,
+        "uranus": 200 / 255.0,
+        "neptune": 195 / 255.0,
+        "ceres": 190 / 255.0,
+        "pluto": 205 / 255.0,
+        "eris": 210 / 255.0,
+        "haumea": 200 / 255.0,
+        "makemake": 200 / 255.0,
+        "gonggong": 195 / 255.0,
+        "quaoar": 190 / 255.0,
+    }
+
+    brightness_map: dict[str, float] = {}
+
+    # --- Load brightness_final only ---
+    try:
+        bp_path = PROJECT_ROOT / "brightness_values.json"
+        if bp_path.exists():
+            with open(bp_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            for name, v in data.items():
+                if not isinstance(v, dict) or name.startswith("__"):
+                    continue
+
+                val = v.get("brightness_final")
+                if isinstance(val, (int, float)) and math.isfinite(val):
+                    brightness_map[name] = max(0.0, min(1.0, float(val)))
+
+    except Exception:
+        brightness_map = {}
+
+    # --- Simple lookup ---
+    def brightness_for(name: str) -> float:
+        if name in brightness_map:
+            return brightness_map[name]
+        return max(0.0, min(1.0, float(defaults.get(name, 0.5))))
+
+    # --- Glow uses SAME brightness ---
+    global BODY_GLOW_BRIGHTNESS
+    BODY_GLOW_BRIGHTNESS = {
+        name: brightness_for(name)
+        for name in defaults.keys()
+    }
+
+    # --- Body factory ---
+    def make(name: str, key: str) -> BodyConfig:
+        return BodyConfig(
+            name,
+            marker_radius_px=BODY_MARKER_RADIUS_PX[key],
+            brightness=brightness_for(key),
+            trail_step_minutes=_scaled_trail_step_minutes(
+                TRAIL_STEP_BODY_MULTIPLIERS[key]
+            ),
+        )
+
     return {
-        "sun": BodyConfig("sun", marker_radius_px=BODY_MARKER_RADIUS_PX["sun"], brightness=SUN_BRIGHTNESS, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["sun"])),
-        "moon": BodyConfig("moon", marker_radius_px=BODY_MARKER_RADIUS_PX["moon"], brightness=210, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["moon"])),
-        "mercury": BodyConfig("mercury", marker_radius_px=BODY_MARKER_RADIUS_PX["mercury"], brightness=180, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["mercury"])),
-        "venus": BodyConfig("venus", marker_radius_px=BODY_MARKER_RADIUS_PX["venus"], brightness=190, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["venus"])),
-        "earth": BodyConfig("earth", marker_radius_px=BODY_MARKER_RADIUS_PX["earth"], brightness=220, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["earth"])),
-        "mars": BodyConfig("mars barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["mars"], brightness=185, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["mars"])),
-        "jupiter": BodyConfig("jupiter barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["jupiter"], brightness=230, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["jupiter"])),
-        "saturn": BodyConfig("saturn barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["saturn"], brightness=215, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["saturn"])),
-        "uranus": BodyConfig("uranus barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["uranus"], brightness=200, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["uranus"])),
-        "neptune": BodyConfig("neptune barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["neptune"], brightness=195, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["neptune"])),
-        "ceres": BodyConfig("ceres", marker_radius_px=BODY_MARKER_RADIUS_PX["ceres"], brightness=190, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["ceres"])),
-        "pluto": BodyConfig("pluto", marker_radius_px=BODY_MARKER_RADIUS_PX["pluto"], brightness=205, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["pluto"])),
-        "eris": BodyConfig("eris", marker_radius_px=BODY_MARKER_RADIUS_PX["eris"], brightness=210, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["eris"])),
-        "haumea": BodyConfig("haumea", marker_radius_px=BODY_MARKER_RADIUS_PX["haumea"], brightness=200, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["haumea"])),
-        "makemake": BodyConfig("makemake", marker_radius_px=BODY_MARKER_RADIUS_PX["makemake"], brightness=200, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["makemake"])),
-        "gonggong": BodyConfig("gonggong", marker_radius_px=BODY_MARKER_RADIUS_PX["gonggong"], brightness=195, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["gonggong"])),
-        "quaoar": BodyConfig("quaoar", marker_radius_px=BODY_MARKER_RADIUS_PX["quaoar"], brightness=190, trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["quaoar"])),
+        "sun": BodyConfig("sun", marker_radius_px=BODY_MARKER_RADIUS_PX["sun"], brightness=brightness_for("sun"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["sun"])),
+        "moon": BodyConfig("moon", marker_radius_px=BODY_MARKER_RADIUS_PX["moon"], brightness=brightness_for("moon"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["moon"])),
+        "mercury": BodyConfig("mercury", marker_radius_px=BODY_MARKER_RADIUS_PX["mercury"], brightness=brightness_for("mercury"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["mercury"])),
+        "venus": BodyConfig("venus", marker_radius_px=BODY_MARKER_RADIUS_PX["venus"], brightness=brightness_for("venus"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["venus"])),
+        "earth": BodyConfig("earth", marker_radius_px=BODY_MARKER_RADIUS_PX["earth"], brightness=brightness_for("earth"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["earth"])),
+        "mars": BodyConfig("mars barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["mars"], brightness=brightness_for("mars"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["mars"])),
+        "jupiter": BodyConfig("jupiter barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["jupiter"], brightness=brightness_for("jupiter"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["jupiter"])),
+        "saturn": BodyConfig("saturn barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["saturn"], brightness=brightness_for("saturn"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["saturn"])),
+        "uranus": BodyConfig("uranus barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["uranus"], brightness=brightness_for("uranus"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["uranus"])),
+        "neptune": BodyConfig("neptune barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["neptune"], brightness=brightness_for("neptune"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["neptune"])),
+        "ceres": BodyConfig("ceres", marker_radius_px=BODY_MARKER_RADIUS_PX["ceres"], brightness=brightness_for("ceres"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["ceres"])),
+        "pluto": BodyConfig("pluto", marker_radius_px=BODY_MARKER_RADIUS_PX["pluto"], brightness=brightness_for("pluto"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["pluto"])),
+        "eris": BodyConfig("eris", marker_radius_px=BODY_MARKER_RADIUS_PX["eris"], brightness=brightness_for("eris"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["eris"])),
+        "haumea": BodyConfig("haumea", marker_radius_px=BODY_MARKER_RADIUS_PX["haumea"], brightness=brightness_for("haumea"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["haumea"])),
+        "makemake": BodyConfig("makemake", marker_radius_px=BODY_MARKER_RADIUS_PX["makemake"], brightness=brightness_for("makemake"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["makemake"])),
+        "gonggong": BodyConfig("gonggong", marker_radius_px=BODY_MARKER_RADIUS_PX["gonggong"], brightness=brightness_for("gonggong"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["gonggong"])),
+        "quaoar": BodyConfig("quaoar", marker_radius_px=BODY_MARKER_RADIUS_PX["quaoar"], brightness=brightness_for("quaoar"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["quaoar"])),
     }
 
 

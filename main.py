@@ -1,3 +1,5 @@
+"""CLI entrypoint for rendering the geocentric wallpaper once."""
+
 from __future__ import annotations
 
 import argparse
@@ -21,6 +23,7 @@ def _parse_bool(value: str) -> bool:
 
 def _apply_runtime_config(
     show_labels: bool,
+    glow_enabled: bool,
     image_width: int,
     image_height: int,
     yaw_deg: float,
@@ -39,6 +42,7 @@ def _apply_runtime_config(
     selection_expression: str | None,
 ) -> None:
     config.SHOW_BODY_LABELS = bool(show_labels)
+    config.SHOW_MARKER_GLOW = bool(glow_enabled)
     config.IMAGE_WIDTH = max(1, int(image_width))
     config.IMAGE_HEIGHT = max(1, int(image_height))
     config.VIEW_YAW_DEG = float(yaw_deg)
@@ -79,6 +83,7 @@ def _apply_runtime_config(
 
 def run_once(
     show_labels: bool = False,
+    glow_enabled: bool = True,
     image_width: int = 1920,
     image_height: int = 1080,
     yaw_deg: float = 0.0,
@@ -98,6 +103,7 @@ def run_once(
 ) -> None:
     _apply_runtime_config(
         show_labels=show_labels,
+        glow_enabled=glow_enabled,
         image_width=image_width,
         image_height=image_height,
         yaw_deg=yaw_deg,
@@ -132,6 +138,7 @@ def run_once(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate solar-system wallpaper")
     parser.add_argument("--labels", type=_parse_bool, default=True, help="Show body labels (True/False)")
+    parser.add_argument("--glow", type=_parse_bool, default=True, help="Enable marker glow (True/False)")
     parser.add_argument("--width", type=int, default=1920, help="Output image width")
     parser.add_argument("--height", type=int, default=1080, help="Output image height")
     parser.add_argument("--yaw", type=float, default=0.0, help="View yaw in degrees")
@@ -155,6 +162,7 @@ if __name__ == "__main__":
     args = _parse_args()
     run_once(
         show_labels=args.labels,
+        glow_enabled=args.glow,
         image_width=args.width,
         image_height=args.height,
         yaw_deg=args.yaw,

@@ -1,0 +1,160 @@
+{
+  "sun": {
+    "semi_major_au": 0.0,
+    "radius_km": 695700.0,
+    "brightness_raw": Infinity,
+    "brightness_log": 49.0815630702886,
+    "brightness_linear_ratio_to_sun": 1.0,
+    "brightness_normalized": 1.0,
+    "brightness_final": 1.0
+  },
+  "mercury": {
+    "semi_major_au": 0.387098,
+    "radius_km": 2439.7,
+    "brightness_raw": 1.698396144716962e+17,
+    "brightness_log": 39.673630942353135,
+    "brightness_linear_ratio_to_sun": 8.207048326135887e-05,
+    "brightness_normalized": 8.207048326135887e-05,
+    "brightness_final": 0.8284832641018539
+  },
+  "venus": {
+    "semi_major_au": 0.723332,
+    "radius_km": 6051.8,
+    "brightness_raw": 2.9929659411639e+17,
+    "brightness_log": 40.24021143020706,
+    "brightness_linear_ratio_to_sun": 0.00014462713068454596,
+    "brightness_normalized": 0.00014462713068454596,
+    "brightness_final": 0.8379247054780976
+  },
+  "earth": {
+    "semi_major_au": 1.0,
+    "radius_km": 6371.0,
+    "brightness_raw": 1.7354943656730544e+17,
+    "brightness_log": 39.695238890698114,
+    "brightness_linear_ratio_to_sun": 8.386315626728505e-05,
+    "brightness_normalized": 8.386315626728505e-05,
+    "brightness_final": 0.8288413779488435
+  },
+  "moon": {
+    "semi_major_au": 1.0,
+    "radius_km": 1737.1,
+    "brightness_raw": 1.2902017851995742e+16,
+    "brightness_log": 37.0961601166809,
+    "brightness_linear_ratio_to_sun": 6.23455748797894e-06,
+    "brightness_normalized": 6.23455748797894e-06,
+    "brightness_final": 0.7868575434593966
+  },
+  "mars": {
+    "semi_major_au": 1.523679,
+    "radius_km": 3389.5,
+    "brightness_raw": 2.1158862214884604e+16,
+    "brightness_log": 37.59083522989199,
+    "brightness_linear_ratio_to_sun": 1.0224458249258901e-05,
+    "brightness_normalized": 1.0224458249258901e-05,
+    "brightness_final": 0.7946809570133102
+  },
+  "jupiter": {
+    "semi_major_au": 5.2044,
+    "radius_km": 69911.0,
+    "brightness_raw": 7.715386557992604e+17,
+    "brightness_log": 41.18716317018878,
+    "brightness_linear_ratio_to_sun": 0.00037282556565633814,
+    "brightness_normalized": 0.00037282556565633814,
+    "brightness_final": 0.853945420205794
+  },
+  "saturn": {
+    "semi_major_au": 9.5826,
+    "radius_km": 58232.0,
+    "brightness_raw": 1.5789365950638173e+17,
+    "brightness_log": 39.60069816024497,
+    "brightness_linear_ratio_to_sun": 7.629791777319843e-05,
+    "brightness_normalized": 7.629791777319843e-05,
+    "brightness_final": 0.8272756732579463
+  },
+  "uranus": {
+    "semi_major_au": 19.2184,
+    "radius_km": 25362.0,
+    "brightness_raw": 7446300145194727.0,
+    "brightness_log": 36.546493679137136,
+    "brightness_linear_ratio_to_sun": 3.598226793708964e-06,
+    "brightness_normalized": 3.598226793708964e-06,
+    "brightness_final": 0.7782547332043421
+  },
+  "neptune": {
+    "semi_major_au": 30.110387,
+    "radius_km": 24622.0,
+    "brightness_raw": 2859051491230112.0,
+    "brightness_log": 35.589266318312575,
+    "brightness_linear_ratio_to_sun": 1.381560705282144e-06,
+    "brightness_normalized": 1.381560705282144e-06,
+    "brightness_final": 0.7634971134287366
+  },
+  "ceres": {
+    "semi_major_au": 2.7675,
+    "radius_km": 473.0,
+    "brightness_raw": 124897866624753.2,
+    "brightness_log": 32.4585174522477,
+    "brightness_linear_ratio_to_sun": 6.035357713270408e-08,
+    "brightness_normalized": 6.035357713270408e-08,
+    "brightness_final": 0.7171567002784784
+  },
+  "pluto": {
+    "semi_major_au": 39.482,
+    "radius_km": 1188.3,
+    "brightness_raw": 3873128480807.5327,
+    "brightness_log": 28.98508368937015,
+    "brightness_linear_ratio_to_sun": 1.871586479644182e-09,
+    "brightness_normalized": 1.871586479644182e-09,
+    "brightness_final": 0.6690278518763259
+  },
+  "eris": {
+    "semi_major_au": 67.69,
+    "radius_km": 1163.0,
+    "brightness_raw": 1262171586133.9822,
+    "brightness_log": 27.86385483446144,
+    "brightness_linear_ratio_to_sun": 6.099108994976821e-10,
+    "brightness_normalized": 6.099108994976821e-10,
+    "brightness_final": 0.6541921490984379
+  },
+  "haumea": {
+    "semi_major_au": 43.116,
+    "radius_km": 816.0,
+    "brightness_raw": 1531480209066.9634,
+    "brightness_log": 28.05725584055459,
+    "brightness_linear_ratio_to_sun": 7.400471394986519e-10,
+    "brightness_normalized": 7.400471394986519e-10,
+    "brightness_final": 0.6567274776846664
+  },
+  "makemake": {
+    "semi_major_au": 45.499,
+    "radius_km": 715.0,
+    "brightness_raw": 1055884411554.4786,
+    "brightness_log": 27.685399836466342,
+    "brightness_linear_ratio_to_sun": 5.102281007523895e-10,
+    "brightness_normalized": 5.102281007523895e-10,
+    "brightness_final": 0.6518614336776261
+  },
+  "gonggong": {
+    "semi_major_au": 66.895,
+    "radius_km": 600.0,
+    "brightness_raw": 343972072023.64307,
+    "brightness_log": 26.563826305046266,
+    "brightness_linear_ratio_to_sun": 1.6621536893617863e-10,
+    "brightness_normalized": 1.6621536893617863e-10,
+    "brightness_final": 0.6374020025189359
+  },
+  "quaoar": {
+    "semi_major_au": 43.694,
+    "radius_km": 555.0,
+    "brightness_raw": 689843148823.0686,
+    "brightness_log": 27.259730088150206,
+    "brightness_linear_ratio_to_sun": 3.333483814983681e-10,
+    "brightness_normalized": 3.333483814983681e-10,
+    "brightness_final": 0.6463354357070857
+  },
+  "__meta__": {
+    "gamma": 0.02,
+    "normalization": "ratio_to_sun",
+    "sun_raw": 2.0694360228248045e+21
+  }
+}

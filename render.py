@@ -1,3 +1,5 @@
+"""High-resolution trail/marker renderer with layered caching."""
+
 from __future__ import annotations
 
 import colorsys
@@ -20,17 +22,29 @@ from trail_kinematics import TrailKinematicsBundle, compute_or_load_kinematics
 TRAIL_LAYER_CACHE_IMAGE = "trail_layer_cache.png"
 TRAIL_LAYER_CACHE_META = "trail_layer_cache.json"
 OVERLAY_STATE_FILE = "render_overlay_state.json"
-MARKER_STYLE_VERSION = 4
+MARKER_STYLE_VERSION = 8
 
 
 def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
-def _revalue_rgb(color: tuple[int, int, int], target_value_255: int) -> tuple[int, int, int]:
+def _revalue_rgb(color: tuple[int, int, int], target_value: float | int | None) -> tuple[int, int, int]:
+    """Revalue an RGB color to a target V (0..1 float or 0..255 int).
+
+    Accepts `target_value` as:
+    - float in 0..1: used directly as HSV V
+    - int in 0..255: converted to 0..1
+    - None: treated as 1.0
+    """
     r, g, b = color
     h, s, _ = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
-    target_v = _clamp01(target_value_255 / 255.0)
+    if target_value is None:
+        target_v = 1.0
+    elif isinstance(target_value, (int,)):
+        target_v = _clamp01(float(target_value) / 255.0)
+    else:
+        target_v = _clamp01(float(target_value))
     rr, gg, bb = colorsys.hsv_to_rgb(h, s, target_v)
     return (int(round(rr * 255.0)), int(round(gg * 255.0)), int(round(bb * 255.0)))
 
@@ -66,7 +80,6 @@ def _overlay_signature() -> str:
         "ssaa": config.SSAA_SCALE,
         "background": config.BACKGROUND_BRIGHTNESS,
         "trail_line_width": config.TRAIL_LINE_WIDTH_PX,
-        "trail_base_brightness": config.TRAIL_BASE_BRIGHTNESS,
         "trail_dynamic_saturation": bool(config.TRAIL_DYNAMIC_SATURATION),
         "trail_saturation_angular_blend": config.TRAIL_SATURATION_ANGULAR_BLEND,
         "trail_brightness_angular_blend": config.TRAIL_BRIGHTNESS_ANGULAR_BLEND,
@@ -79,6 +92,7 @@ def _overlay_signature() -> str:
         "orbit_radius_power": config.ORBIT_RADIUS_POWER,
         "world_view_fill_fraction": config.WORLD_VIEW_FILL_FRACTION,
         "show_labels": config.SHOW_BODY_LABELS,
+        "show_glow": bool(config.SHOW_MARKER_GLOW),
         "text_scale": config.TEXT_SCALE,
         "label_offset_mul": config.LABEL_OFFSET_RADIUS_MULTIPLIER,
         "show_celestial_scale": bool(config.SHOW_CELESTIAL_SCALE),
@@ -140,7 +154,6 @@ def _trail_signature(
         "ssaa": ssaa_scale,
         "trail_line_width_scale": config.TRAIL_LINE_WIDTH_PX,
         "trail_line_widths": trail_line_widths,
-        "trail_base_brightness": config.TRAIL_BASE_BRIGHTNESS,
         "trail_brightness_angular_blend": config.TRAIL_BRIGHTNESS_ANGULAR_BLEND,
         "trail_min_fade": config.TRAIL_MIN_FADE,
         "trail_fade_power": config.TRAIL_FADE_POWER,
@@ -436,111 +449,265 @@ def _draw_celestial_scale_overlay(
     image.paste(composited.convert("RGB"))
 
 
-def _draw_markers(
-    image: Image.Image,
+def _scale_position(position_xy: tuple[float, float], scale: int) -> tuple[float, float]:
+    x, y = position_xy
+    return x * scale, y * scale
+
+
+def _resolve_marker_color(
+    name: str,
+    body_cfg: config.BodyConfig,
+    kin_bundle: TrailKinematicsBundle,
+    center_name: str,
+) -> tuple[int, int, int]:
+    if name == center_name:
+        return (255, 255, 255)
+
+    body_kin = kin_bundle.by_body.get(name)
+    if body_kin and body_kin.segment_colors:
+        idx = -2 if len(body_kin.segment_colors) >= 2 else -1
+        return _revalue_rgb(body_kin.segment_colors[idx], body_cfg.brightness)
+
+    bv = int(round(_clamp01(float(body_cfg.brightness)) * 255.0))
+    return (bv, bv, bv)
+
+def _build_marker_rows(
     projected: dict[str, ProjectedBody],
     kin_bundle: TrailKinematicsBundle,
     ssaa_scale: int,
-) -> None:
-    draw = ImageDraw.Draw(image)
+) -> list[tuple[str, ProjectedBody, config.BodyConfig, float, float, float, tuple[int, int, int]]]:
+    rows = []
     center_name = str(config.OBSERVER_CENTER_BODY).strip().lower()
 
     for name, body_cfg in config.BODIES.items():
         body = projected[name]
-        x, y = body.position_xy
-        sx = x * ssaa_scale
-        sy = y * ssaa_scale
+        sx, sy = _scale_position(body.position_xy, ssaa_scale)
         r = body_cfg.marker_radius_px * ssaa_scale
+        color = _resolve_marker_color(name, body_cfg, kin_bundle, center_name)
 
-        if name == center_name:
-            marker_color = (255, 255, 255)
-        else:
-            body_kin = kin_bundle.by_body.get(name)
-            if body_kin is not None and body_kin.segment_colors:
-                # Keep marker tint close to recent trail color, but not identical
-                # to the newest segment so the final segment remains distinguishable.
-                color_idx = -2 if len(body_kin.segment_colors) >= 2 else -1
-                marker_color = _revalue_rgb(body_kin.segment_colors[color_idx], body_cfg.brightness)
-            else:
-                b = body_cfg.brightness
-                marker_color = (b, b, b)
+        rows.append((name, body, body_cfg, sx, sy, r, color))
 
-        body_kin = kin_bundle.by_body.get(name)
+    return rows
 
-        if name == "earth":
-            draw.ellipse((sx - r, sy - r, sx + r, sy + r), fill=marker_color)
-        elif name == "sun":
-            outer = r
-            inner = max(1.0, r * 0.45)
-            points: list[tuple[float, float]] = []
-            for i in range(10):
-                angle = -math.pi / 2.0 + i * (math.pi / 5.0)
-                radius = outer if i % 2 == 0 else inner
-                points.append((sx + math.cos(angle) * radius, sy + math.sin(angle) * radius))
-            draw.polygon(points, fill=marker_color)
-        elif name == "moon":
-            points = [
-                (sx, sy - r),
-                (sx - r, sy + r),
-                (sx + r, sy + r),
-            ]
-            draw.polygon(points, fill=marker_color)
-        elif dwarf_planet_orbits.is_dwarf_planet_body(name):
-            draw.rectangle((sx - r, sy - r, sx + r, sy + r), fill=marker_color)
-        else:
-            draw.ellipse((sx - r, sy - r, sx + r, sy + r), fill=marker_color)
+def _draw_single_glow(gdraw, sx, sy, r, color, brightness: float) -> None:
+    b = _clamp01(float(brightness))
+    if b <= 0.0:
+        return
 
-        if not bool(config.SHOW_BODY_LABELS):
+    glow_strength = b ** 2.0
+    if glow_strength <= 1e-6:
+        return
+
+    # Keep a small floor so tiny markers can still glow, but avoid flattening
+    # all bodies into the same giant halo footprint.
+    base_r = max(24.0, 5 * float(r))
+    inner_r = base_r
+    outer_r = base_r * (1.6 + 2.2 * glow_strength)
+
+    peak_alpha = int(round(88.0 * glow_strength))
+    peak_alpha = max(0, min(128, peak_alpha))
+
+    rings = 4
+
+    # IMPORTANT: outer → inner
+    for i in range(rings, 0, -1):
+        t = i / float(rings)  # 1 → outer, 0 → inner
+
+        rr = outer_r * t
+
+        inner_weight = 1.0 - t
+        alpha = int(round(peak_alpha * (0.8 * (inner_weight ** 1.7))))
+
+        if alpha <= 0:
             continue
 
+        gdraw.ellipse(
+            (sx - rr, sy - rr, sx + rr, sy + rr),
+            fill=(*color, max(0, min(255, alpha))),
+        )
+
+def _draw_marker_glow(
+    image: Image.Image,
+    marker_rows,
+) -> None:
+    glow_accum = Image.new("RGB", image.size, (0, 0, 0))
+    black = Image.new("RGB", image.size, (0, 0, 0))
+
+    for name, _, body_cfg, sx, sy, r, color in marker_rows:
+        body_glow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        gdraw = ImageDraw.Draw(body_glow, "RGBA")
+        glow_brightness = config.BODY_GLOW_BRIGHTNESS.get(name, body_cfg.brightness)
+        _draw_single_glow(gdraw, sx, sy, r, color, glow_brightness)
+        alpha = body_glow.getchannel("A")
+        weighted_glow = Image.composite(body_glow.convert("RGB"), black, alpha)
+        glow_accum = ImageChops.add(glow_accum, weighted_glow)
+
+    image.paste(ImageChops.add(image, glow_accum))
+
+def _draw_star(draw, sx, sy, r, color) -> None:
+    outer = r
+    inner = max(1.0, r * 0.45)
+
+    points = []
+    for i in range(10):
+        angle = -math.pi / 2.0 + i * (math.pi / 5.0)
+        radius = outer if i % 2 == 0 else inner
+        points.append((sx + math.cos(angle) * radius, sy + math.sin(angle) * radius))
+
+    draw.polygon(points, fill=color)
+
+def _draw_single_marker(draw, name: str, sx, sy, r, color) -> None:
+    if name == "earth":
+        draw.ellipse((sx - r, sy - r, sx + r, sy + r), fill=color)
+
+    elif name == "sun":
+        _draw_star(draw, sx, sy, r, color)
+
+    elif name == "moon":
+        draw.polygon([(sx, sy - r), (sx - r, sy + r), (sx + r, sy + r)], fill=color)
+
+    elif dwarf_planet_orbits.is_dwarf_planet_body(name):
+        draw.rectangle((sx - r, sy - r, sx + r, sy + r), fill=color)
+
+    else:
+        draw.ellipse((sx - r, sy - r, sx + r, sy + r), fill=color)
+
+def _draw_marker_shapes(image: Image.Image, marker_rows, kin_bundle) -> None:
+    del kin_bundle
+    marker_accum = Image.new("RGB", image.size, (0, 0, 0))
+    marker_mask = Image.new("L", image.size, 0)
+
+    for name, body, body_cfg, sx, sy, r, color in marker_rows:
+        del body, body_cfg
+        marker_layer = Image.new("RGB", image.size, (0, 0, 0))
+        marker_draw = ImageDraw.Draw(marker_layer)
+        _draw_single_marker(marker_draw, name, sx, sy, r, color)
+        marker_accum = ImageChops.add(marker_accum, marker_layer)
+
+        mask_layer = Image.new("L", image.size, 0)
+        mask_draw = ImageDraw.Draw(mask_layer)
+        _draw_single_marker(mask_draw, name, sx, sy, r, 255)
+        marker_mask = ImageChops.lighter(marker_mask, mask_layer)
+
+    image.paste(marker_accum, mask=marker_mask)
+
+def _save_output_image(image: Image.Image, output_path: str) -> None:
+    """Save output image atomically with short retry windows for Windows locks."""
+
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    unique = f"{os.getpid()}_{int(time.time() * 1000)}"
+    tmp_path = f"{output_path}.{unique}.tmp"
+    image.save(tmp_path, format="PNG")
+
+    delays = (0.02, 0.05, 0.1, 0.2, 0.4)
+    last_err: OSError | None = None
+    for delay in delays:
+        try:
+            os.replace(tmp_path, output_path)
+            last_err = None
+            break
+        except OSError as e:
+            last_err = e
+            time.sleep(delay)
+
+    if last_err is not None:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        raise last_err
+
+def _compute_label_direction(name, body, center_name):
+    if name == center_name:
+        return 0.0, -1.0
+
+    trail = body.trail_xy
+    if len(trail) >= 2:
+        x0, y0 = trail[-2]
+        x1, y1 = trail[-1]
+        vx, vy = x1 - x0, y1 - y0
+        mag = math.hypot(vx, vy)
+        if mag > 1e-12:
+            return vx / mag, vy / mag
+
+    return 1.0, 0.0
+
+def _compute_label_offset(dir_x, dir_y, label_w, label_h, body_cfg, marker_r, ssaa_scale):
+    dir_clearance = 0.5 * (abs(dir_x) * label_w + abs(dir_y) * label_h)
+
+    base_gap = (
+        math.sqrt(max(1.0, float(body_cfg.marker_radius_px)))
+        * ssaa_scale
+        * max(0.0, float(config.LABEL_OFFSET_RADIUS_MULTIPLIER))
+    )
+
+    edge_padding = max(1.0, 1.5 * ssaa_scale)
+
+    return marker_r + dir_clearance + base_gap + edge_padding
+
+
+def _draw_single_label(draw, name, body, body_cfg, sx, sy, r, color, center_name, ssaa_scale):
+    text_scale = max(0.1, float(config.TEXT_SCALE))
+
+    label_radius = (
+        math.sqrt(max(1.0, float(body_cfg.marker_radius_px))) * ssaa_scale
+    )
+
+    label_size = max(8, int(round(label_radius * 1.8 * text_scale)))
+    font = _get_label_font(label_size)
+
+    text = name.capitalize()
+    dir_x, dir_y = _compute_label_direction(name, body, center_name)
+
+    bbox = draw.textbbox((0, 0), text, font=font)
+    label_w, label_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    offset = _compute_label_offset(
+        dir_x, dir_y, label_w, label_h, body_cfg, r, ssaa_scale
+    )
+
+    anchor_x = sx + dir_x * offset
+    anchor_y = sy + dir_y * offset
+
+    draw.text(
+        (anchor_x - 0.5 * label_w, anchor_y - 0.5 * label_h),
+        text,
+        font=font,
+        fill=color,
+    )
+
+def _draw_labels(image, marker_rows, center_name, ssaa_scale):
+    if not bool(config.SHOW_BODY_LABELS):
+        return
+
+    label_accum = Image.new("RGB", image.size, (0, 0, 0))
+
+    for name, body, body_cfg, sx, sy, r, color in marker_rows:
         if name == "sun":
             continue
 
-        text_scale = max(0.1, float(config.TEXT_SCALE))
-        label_radius = math.sqrt(max(1.0, float(body_cfg.marker_radius_px))) * ssaa_scale
-        label_size = max(8, int(round(label_radius * 1.8 * text_scale)))
-        font = _get_label_font(label_size)
-        label_text = name.capitalize()
+        label_layer = Image.new("RGB", image.size, (0, 0, 0))
+        draw = ImageDraw.Draw(label_layer)
+        _draw_single_label(
+            draw, name, body, body_cfg, sx, sy, r, color, center_name, ssaa_scale
+        )
 
-        if name == center_name:
-            # Keep the observer-center label fixed above the body.
-            dir_x, dir_y = 0.0, -1.0
-        else:
-            # Follow the latest projected trail tangent (center-frame relative velocity).
-            trail_xy = body.trail_xy
-            if len(trail_xy) >= 2:
-                x_prev, y_prev = trail_xy[-2]
-                x_last, y_last = trail_xy[-1]
-                vx = x_last - x_prev
-                vy = y_last - y_prev
-                vm = math.hypot(vx, vy)
-                if vm > 1e-12:
-                    dir_x, dir_y = vx / vm, vy / vm
-                else:
-                    dir_x, dir_y = 1.0, 0.0
-            else:
-                dir_x, dir_y = 1.0, 0.0
+        label_accum = ImageChops.add(label_accum, label_layer)
 
-        offset = label_radius
-        anchor_x = sx + dir_x * offset
-        anchor_y = sy + dir_y * offset
+    image.paste(ImageChops.add(image, label_accum))
 
-        bbox = draw.textbbox((0, 0), label_text, font=font)
-        label_w = bbox[2] - bbox[0]
-        label_h = bbox[3] - bbox[1]
-        marker_r = max(0.0, float(body_cfg.marker_radius_px) * ssaa_scale)
+def _draw_markers(image, projected, kin_bundle, ssaa_scale):
+    marker_rows = _build_marker_rows(projected, kin_bundle, ssaa_scale)
+    center_name = str(config.OBSERVER_CENTER_BODY).strip().lower()
 
-        # Robust clearance: keep text box outside marker by projecting text half-extents
-        # onto placement direction. Horizontal placement pushes farther than vertical.
-        dir_clearance = 0.5 * (abs(dir_x) * label_w + abs(dir_y) * label_h)
-        base_gap = label_radius * max(0.0, float(config.LABEL_OFFSET_RADIUS_MULTIPLIER))
-        edge_padding = max(1.0, 1.5 * ssaa_scale)
-        offset = marker_r + dir_clearance + base_gap + edge_padding
-
-        anchor_x = sx + dir_x * offset
-        anchor_y = sy + dir_y * offset
-        draw.text((anchor_x - 0.5 * label_w, anchor_y - 0.5 * label_h), label_text, font=font, fill=marker_color)
-
+    if bool(config.SHOW_MARKER_GLOW):
+        _draw_marker_glow(image, marker_rows)
+    _draw_marker_shapes(image, marker_rows, kin_bundle)
+    _draw_labels(image, marker_rows, center_name, ssaa_scale)
 
 def render_wallpaper(projected: dict[str, ProjectedBody], at_time: datetime) -> Image.Image:
     del at_time
@@ -559,6 +726,6 @@ def render_wallpaper(projected: dict[str, ProjectedBody], at_time: datetime) -> 
     if ssaa_scale > 1:
         image = image.resize((config.IMAGE_WIDTH, config.IMAGE_HEIGHT), resample=Image.Resampling.LANCZOS)
 
-    image.save(config.OUTPUT_PATH, format="PNG")
+    _save_output_image(image, config.OUTPUT_PATH)
     _mark_overlay_rendered()
     return image

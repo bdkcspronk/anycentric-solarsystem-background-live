@@ -1,3 +1,5 @@
+"""Analytic dwarf-planet orbital model used as an ephemeris fallback."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,3 +1,5 @@
+"""Per-segment trail kinematics and color generation with persistent cache."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -230,6 +232,7 @@ def _segment_color_rgb(
     global_speed_max: float,
     global_angular_speed_max: float,
     global_accel_max: float,
+    body_brightness: float = 1.0,
 ) -> tuple[int, int, int]:
     eps = 1e-12
     t = 1.0 if segment_count <= 1 else segment_index / (segment_count - 1)
@@ -247,8 +250,9 @@ def _segment_color_rgb(
     value_linear = _clamp01(speed / max(eps, global_speed_max))
     value_angular = _clamp01(angular_speed / max(eps, global_angular_speed_max))
     value_from_speed = (1.0 - blend) * value_linear + blend * value_angular
-    value_scale = _clamp01(config.TRAIL_BASE_BRIGHTNESS / 255.0)
-    val = _clamp01(value_from_speed * value_scale * fade)
+    # Use computed per-body brightness (0..1) as the only brightness scale.
+    body_scale = _clamp01(float(body_brightness))
+    val = _clamp01(value_from_speed * body_scale * fade)
 
     rr, gg, bb = colorsys.hsv_to_rgb(hue, sat, val)
     return (int(round(rr * 255.0)), int(round(gg * 255.0)), int(round(bb * 255.0)))
@@ -300,6 +304,7 @@ def compute_or_load_kinematics(projected: dict[str, ProjectedBody]) -> TrailKine
         seg_count = len(raw.hues)
         colors: list[tuple[int, int, int]] = []
         for i in range(seg_count):
+            body_cfg = config.BODIES.get(name)
             colors.append(
                 _segment_color_rgb(
                     i,
@@ -311,6 +316,7 @@ def compute_or_load_kinematics(projected: dict[str, ProjectedBody]) -> TrailKine
                     global_speed_max,
                     global_angular_speed_max,
                     global_accel_max,
+                    body_brightness=1.0 if body_cfg is None else float(body_cfg.brightness),
                 )
             )
         by_body[name] = BodyTrailKinematics(hue_list=raw.hues, segment_colors=colors)

@@ -7,6 +7,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptDirName = Split-Path -Leaf $scriptDir
+$projectRoot = if ($scriptDirName -ieq "optimized_rewrite") { Split-Path -Parent $scriptDir } else { $scriptDir }
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $scriptDir "wallpaper_scheduler_config.json"
 }
@@ -14,7 +16,9 @@ $cycleStatePath = Join-Path $scriptDir "wallpaper_cycle_state.json"
 $rotationStatePath = Join-Path $scriptDir "wallpaper_rotation_state.json"
 $cycleCacheDir = Join-Path $scriptDir "wallpaper_cycle_cache"
 
-$pythonExe = Join-Path $scriptDir ".venv\Scripts\python.exe"
+$pythonExe = Join-Path $projectRoot ".venv\Scripts\python.exe"
+$localPythonExe = Join-Path $scriptDir ".venv\Scripts\python.exe"
+$pythonExe = if (Test-Path $pythonExe) { $pythonExe } else { $localPythonExe }
 $mainPy = Join-Path $scriptDir "main.py"
 
 if (-not (Test-Path $pythonExe)) {
@@ -170,8 +174,12 @@ function Get-SelectedBodiesForExpression {
     param([string]$SelectionExpr)
 
     $exprForPy = if ($null -eq $SelectionExpr) { "" } else { $SelectionExpr }
+    $scriptDirForPy = $scriptDir -replace "\\", "\\\\"
     $code = @"
 import json
+import sys
+
+sys.path.insert(0, r'''$scriptDirForPy''')
 import config
 
 expr = '''$exprForPy'''.strip()
@@ -425,7 +433,7 @@ if ($VerboseLog) {
     }
 }
 
-$imagePath = Join-Path $scriptDir "geocentric.png"
+$imagePath = Join-Path $projectRoot "geocentric.png"
 if ($null -eq $cacheHitImagePath) {
     & $pythonExe $mainPy @forwardArgs
     if ($LASTEXITCODE -ne 0) {

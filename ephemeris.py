@@ -1,3 +1,5 @@
+"""Ephemeris and trail-cache pipeline for observer-centered body states."""
+
 from __future__ import annotations
 
 import json
@@ -5,9 +7,10 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
-from skyfield.api import load
+from skyfield.api import Loader, load
 
 import config
 import dwarf_planet_orbits
@@ -21,7 +24,7 @@ class BodyState:
 
 
 CACHE_VERSION = 2
-CACHE_PATH = "trail_cache.json"
+CACHE_PATH = Path(__file__).resolve().parent / "trail_cache.json"
 DE440S_MIN_UTC = datetime(1849, 12, 26, tzinfo=timezone.utc)
 
 
@@ -33,7 +36,16 @@ def _ensure_utc(at_time: datetime) -> datetime:
 
 @lru_cache(maxsize=1)
 def _get_kernel():
-    return load(config.EPHEMERIS_KERNEL)
+    kernel_path = Path(config.EPHEMERIS_KERNEL).expanduser()
+    kernel_dir = kernel_path.parent
+    kernel_name = kernel_path.name
+
+    kernel_dir.mkdir(parents=True, exist_ok=True)
+    # Use a directory-scoped Skyfield loader so missing kernels are downloaded
+    # to the configured target directory instead of treating absolute paths as
+    # URL suffixes.
+    loader = Loader(str(kernel_dir))
+    return loader(kernel_name)
 
 
 @lru_cache(maxsize=1)
@@ -72,7 +84,7 @@ def _align_time_to_step(utc_time: datetime, step_minutes: int) -> datetime:
 
 
 def _cache_file_path() -> str:
-    return os.path.join(os.path.dirname(__file__), CACHE_PATH)
+    return str(CACHE_PATH)
 
 
 def _load_cache() -> dict:
@@ -283,6 +295,7 @@ def get_body_states(at_time: datetime) -> dict[str, BodyState]:
     if center_cfg is None:
         raise ValueError(f"Center body '{config.OBSERVER_CENTER_BODY}' is not in active BODIES")
     center_target = center_cfg.target.lower()
+    center_current_vec = _compute_heliocentric_trail_vectors(center_target, kernel, [utc_time])[0]
 
     states: dict[str, BodyState] = {}
     for name, body_cfg in config.BODIES.items():
@@ -308,12 +321,10 @@ def get_body_states(at_time: datetime) -> dict[str, BodyState]:
             # Keep cache alignment for history, but force the tail sample to exact render time.
             # Use exact render-time position for marker placement without mutating
             # step-aligned trail samples (which keeps segment kinematics/colors stable).
-            current_vec = _compute_relative_trail_vectors(
-                body_cfg.target,
-                center_target,
-                kernel,
-                [utc_time],
-            )[0]
+            # Reuse precomputed center current vector to avoid repeated center
+            # ephemeris lookups in tight render loops.
+            target_current = _compute_heliocentric_trail_vectors(body_cfg.target, kernel, [utc_time])[0]
+            current_vec = target_current - center_current_vec
             position_vec = current_vec
         states[name] = BodyState(
             position_au=position_vec,

@@ -30,7 +30,9 @@ public static class WallpaperApi {
 }
 "@
 
-Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue | Out-Null
+if (-not ("WallpaperApi" -as [type])) {
+    Add-Type -TypeDefinition $signature | Out-Null
+}
 
 $SPI_SETDESKWALLPAPER = 20
 $SPIF_UPDATEINIFILE = 0x01
