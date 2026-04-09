@@ -1,8 +1,83 @@
-# Solar Background Wallpaper Automation (Windows)
+# X-centric Solar Background Wallpaper Automation
 
-Generate a solar-system wallpaper and optionally install a Windows scheduled task to update it.
+Generate a real-time* solar-system wallpaper and optionally install a Windows scheduled task to update it. 
 
-This repository has been refactored into compact, single-responsibility Python modules (ephemeris, trail kinematics, rendering helpers) with a thin orchestration layer in `main.py`. Operational entrypoints are the two PowerShell scripts: `run_wallpaper.ps1` and `setup_wallpaper_scheduler.ps1`.
+*dependent on the schedulers -IntervalMinutes OR -IntervalHours
+
+## Example wallpapers
+
+### Geocentric
+
+![Example wallpaper](assets/earth_sat_linear.png)
+
+```
+.\run_wallpaper.ps1 -MainArgs "--selection", "innerplanets AND outerplanets AND ceres AND moon", "--center-body", "earth", "--bg-color=#06080d", "--orbit-radius-power=0.3", "-Rotate"
+```
+
+![Example wallpaper](assets/earth_sat_angular.png)
+
+```
+.\run_wallpaper.ps1 -VerboseLog -MainArgs "--selection", "innerplanets AND outerplanets AND ceres", "--center-body", "earth", "--bg-color=#06080d", "--yaw=298", "--pitch=332", "--roll=152", "--saturation-angular-blend=1.0"
+```
+
+### Mercury-centric (Doesn't have a cool name)
+
+![Example wallpaper](assets/mercury.png)
+
+```
+.\run_wallpaper.ps1 -MainArgs "--selection", "innerplanets AND ceres", "--center-body", "mercury", "--pitch=100", "--bg-color=#18121a"
+```
+
+### Areocentric
+
+![Example wallpaper](assets/mars.png)
+
+```
+.\run_wallpaper.ps1 -MainArgs "--selection", "innerplanets AND outerplanets", "--center-body", "mars", "--pitch=60", "--bg-color=#0a140d"
+```
+
+### Venocentric
+
+![Example wallpaper](assets/venus.png)
+
+```
+.\run_wallpaper.ps1 -MainArgs "--selection", "innerplanets AND outerplanets", "--center-body", "venus", "--bg-color=#1a1212", "--yaw=140", "--pitch=55", "--roll=134"
+```
+
+### Jovicentric
+
+![Example wallpaper](assets/jupiter.png)
+
+```
+.\run_wallpaper.ps1 -MainArgs "--selection", "outerplanets AND dwarfplanets", "--center-body", "jupiter", "--glow=False", "--yaw=14", "--pitch=54", "--roll=278", "--bg-color=#0d0d0d"
+```
+
+
+### Saturnocentric
+
+![Example wallpaper](assets/saturn.png)
+
+```
+.\run_wallpaper.ps1 -VerboseLog -MainArgs "--selection", "saturn AND dwarfplanets", "--center-body", "saturn", "--yaw=26", "--pitch=138", "--roll=330", "--bg-color=#151515", "--labels=False"
+```
+
+
+### Uranocentric
+
+![Example wallpaper](assets/uranus.png)
+
+```
+.\run_wallpaper.ps1 -VerboseLog -MainArgs "--selection", "outerplanets", "--center-body", "uranus", "--yaw=13", "--pitch=30", "--roll=156", "--bg-color=#110712", "--celestial-scale=True"
+```
+
+
+### Neptunocentric
+
+![Example wallpaper](assets/neptune.png)
+
+```
+.\run_wallpaper.ps1 -VerboseLog -MainArgs "--selection", "outerplanets AND gonggong", "--center-body", "neptune", "--yaw=13", "--pitch=-50", "--roll=-23", "--bg-color=#0a030a", "--dynamic-saturation=False", "--trail-step-scale=0.1"
+```
 
 ## Quick start
 

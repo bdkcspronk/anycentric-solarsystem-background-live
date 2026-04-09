@@ -31,7 +31,10 @@ IMAGE_WIDTH = 2560
 IMAGE_HEIGHT = 1440
 
 # Scene and style settings
+# Background brightness (legacy). Keep for backwards compatibility.
 BACKGROUND_BRIGHTNESS = 1
+# Background color as an RGB tuple (0-255). Can be overridden at runtime.
+BACKGROUND_COLOR = (BACKGROUND_BRIGHTNESS, BACKGROUND_BRIGHTNESS, BACKGROUND_BRIGHTNESS)
 SUN_RADIUS_PX = 12
 
 # Per-body trail width scale. Actual width uses sqrt(marker_radius_px) * this value.
@@ -183,7 +186,7 @@ TRAIL_STEP_BODY_MULTIPLIERS: dict[str, int] = {
     "mercury": 1,
     "venus": 1,
     "earth": 1,
-    "mars": 2,
+    "mars": 1,
     "jupiter": 4,
     "saturn": 8,
     "uranus": 16,

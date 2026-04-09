@@ -54,7 +54,7 @@ def render_wallpaper(projected: dict[str, ProjectedBody], at_time: datetime) -> 
     render_width = config.IMAGE_WIDTH * ssaa_scale
     render_height = config.IMAGE_HEIGHT * ssaa_scale
 
-    image = Image.new("RGB", (render_width, render_height), (config.BACKGROUND_BRIGHTNESS,) * 3)
+    image = Image.new("RGB", (render_width, render_height), config.BACKGROUND_COLOR)
     kin_bundle = compute_or_load_kinematics(projected)
     trail_image = get_trail_layer_image(projected, kin_bundle, render_width, render_height, ssaa_scale)
     image = ImageChops.add(image, trail_image)

@@ -33,6 +33,7 @@ class RunOptions:
     orbit_radius_power: float | None = None
     center_body: str | None = None
     selection_expression: str | None = None
+    bg_color: tuple[int, int, int] | None = None
 
 
 def _parse_bool(value: str) -> bool:
@@ -42,6 +43,40 @@ def _parse_bool(value: str) -> bool:
     if v in {"false", "0", "no", "n", "off"}:
         return False
     raise argparse.ArgumentTypeError("Expected True or False")
+
+
+def _parse_color(value: str) -> tuple[int, int, int]:
+    """Parse a color name or 6-digit hex string into an RGB tuple.
+
+    Accepts names: black, white, red, green, blue, orange, grey/gray.
+    Accepts hex like '#ff00ff' or 'ff00ff'.
+    """
+    if value is None:
+        raise argparse.ArgumentTypeError("Color value cannot be None")
+    v = str(value).strip().lower()
+    named = {
+        "black": (0, 0, 0),
+        "white": (255, 255, 255),
+        "red": (255, 0, 0),
+        "green": (0, 255, 0),
+        "blue": (0, 0, 255),
+        "orange": (255, 165, 0),
+        "grey": (128, 128, 128),
+        "gray": (128, 128, 128),
+    }
+    if v in named:
+        return named[v]
+    if v.startswith("#"):
+        v = v[1:]
+    if len(v) == 6 and all(c in "0123456789abcdef" for c in v):
+        try:
+            r = int(v[0:2], 16)
+            g = int(v[2:4], 16)
+            b = int(v[4:6], 16)
+            return (r, g, b)
+        except ValueError:
+            pass
+    raise argparse.ArgumentTypeError("Expected color name or 6-digit hex (e.g. '#ff00ff')")
 
 
 def _apply_runtime_config(options: RunOptions) -> None:
@@ -75,6 +110,10 @@ def _apply_runtime_config(options: RunOptions) -> None:
         config.set_render_selection_expression(None)
     if options.center_body is not None:
         config.set_observer_center_body(options.center_body)
+
+    if getattr(options, "bg_color", None) is not None:
+        # runtime override of background color
+        config.BACKGROUND_COLOR = tuple(int(c) for c in options.bg_color)
 
     center_key = str(config.OBSERVER_CENTER_BODY).strip().lower()
     if (
@@ -130,6 +169,7 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
         orbit_radius_power=args.orbit_radius_power,
         center_body=args.center_body,
         selection_expression=args.selection,
+        bg_color=args.bg_color,
     )
 
 
@@ -153,6 +193,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--orbit-radius-power", type=float, default=0.5, help="Exponent used when orbit radius mode is power",)
     parser.add_argument("--center-body", type=str, default="venus", help="Observer center body key (e.g. earth, sun, moon, mars)",)
     parser.add_argument("--selection", type=str, default='innerplanets', help="Body selection expression. Examples: 'planets AND moon', 'dwarf planets AND outer planets'. Sun is always included.",)
+    parser.add_argument("--bg-color", type=_parse_color, default=None, help="Background color name or hex code (e.g. 'black' or '#ff00ff')")
     return parser.parse_args()
 
 

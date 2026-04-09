@@ -23,7 +23,8 @@ def _overlay_signature() -> str:
         "image_width": config.IMAGE_WIDTH,
         "image_height": config.IMAGE_HEIGHT,
         "ssaa": config.SSAA_SCALE,
-        "background": config.BACKGROUND_BRIGHTNESS,
+        # include the full RGB background color so changes to --bg-color invalidate overlays
+        "background_color": tuple(config.BACKGROUND_COLOR),
         "trail_line_width": config.TRAIL_LINE_WIDTH_PX,
         "trail_dynamic_saturation": bool(config.TRAIL_DYNAMIC_SATURATION),
         "trail_saturation_angular_blend": config.TRAIL_SATURATION_ANGULAR_BLEND,
