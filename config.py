@@ -1,4 +1,4 @@
-"""Runtime configuration for the geocentric wallpaper renderer.
+"""Runtime configuration for the wallpaper renderer.
 
 This module intentionally exposes mutable globals because the CLI/runtime wrappers
 override settings dynamically before each render.
@@ -6,8 +6,13 @@ override settings dynamically before each render.
 
 from dataclasses import dataclass
 from pathlib import Path
-import json
 import math
+
+from config_body_factory import build_all_bodies as _build_bodies_via_factory
+from config_selection import (
+    evaluate_selection_expression as _evaluate_selection_expression_impl,
+    selector_set as _selector_set_impl,
+)
 
 @dataclass(frozen=True)
 class BodyConfig:
@@ -18,18 +23,12 @@ class BodyConfig:
 
 
 # Project paths
-BASE_DIR = Path(__file__).resolve().parent
-# Support both layouts:
-# - root deployment (this file in project root)
-# - staged deployment (this file in optimized_rewrite/ under project root)
-# Do not key this decision off de440s.bsp existence; on first run the file may
-# be missing and should still download into the correct project folder.
-PROJECT_ROOT = BASE_DIR.parent if BASE_DIR.name.lower() == "optimized_rewrite" else BASE_DIR
+PROJECT_ROOT = Path(__file__).resolve().parent
 
 # Output settings
-OUTPUT_PATH = str(PROJECT_ROOT / "geocentric.png")
-IMAGE_WIDTH = 1920
-IMAGE_HEIGHT = 1080
+OUTPUT_PATH = str(PROJECT_ROOT / "wallpaper.png")
+IMAGE_WIDTH = 2560
+IMAGE_HEIGHT = 1440
 
 # Scene and style settings
 BACKGROUND_BRIGHTNESS = 1
@@ -83,7 +82,7 @@ ORBIT_RADIUS_MODE = "log"
 ORBIT_RADIUS_POWER = 0.5
 
 # Extra per-body visual distance scaling after projection remap.
-# Useful for tiny geocentric orbits like the Moon that are otherwise sub-pixel.
+# Useful for tiny orbits like the Moon that are otherwise sub-pixel.
 BODY_DISTANCE_MULTIPLIERS: dict[str, float] = {
     "moon": 1.0,
     "mercury": 1.0,
@@ -198,6 +197,26 @@ TRAIL_STEP_BODY_MULTIPLIERS: dict[str, int] = {
     "quaoar": 32,
 }
 
+BODY_TARGETS: dict[str, str] = {
+    "sun": "sun",
+    "moon": "moon",
+    "mercury": "mercury",
+    "venus": "venus",
+    "earth": "earth",
+    "mars": "mars barycenter",
+    "jupiter": "jupiter barycenter",
+    "saturn": "saturn barycenter",
+    "uranus": "uranus barycenter",
+    "neptune": "neptune barycenter",
+    "ceres": "ceres",
+    "pluto": "pluto",
+    "eris": "eris",
+    "haumea": "haumea",
+    "makemake": "makemake",
+    "gonggong": "gonggong",
+    "quaoar": "quaoar",
+}
+
 # Per-body glow strength source (0..1). This is intended to use the
 # normalized (non-gamma) brightness when available.
 BODY_GLOW_BRIGHTNESS: dict[str, float] = {}
@@ -228,69 +247,18 @@ def _build_all_bodies() -> dict[str, BodyConfig]:
         "quaoar": 190 / 255.0,
     }
 
-    brightness_map: dict[str, float] = {}
-
-    # --- Load brightness_final only ---
-    try:
-        bp_path = PROJECT_ROOT / "brightness_values.json"
-        if bp_path.exists():
-            with open(bp_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            for name, v in data.items():
-                if not isinstance(v, dict) or name.startswith("__"):
-                    continue
-
-                val = v.get("brightness_final")
-                if isinstance(val, (int, float)) and math.isfinite(val):
-                    brightness_map[name] = max(0.0, min(1.0, float(val)))
-
-    except Exception:
-        brightness_map = {}
-
-    # --- Simple lookup ---
-    def brightness_for(name: str) -> float:
-        if name in brightness_map:
-            return brightness_map[name]
-        return max(0.0, min(1.0, float(defaults.get(name, 0.5))))
-
-    # --- Glow uses SAME brightness ---
     global BODY_GLOW_BRIGHTNESS
-    BODY_GLOW_BRIGHTNESS = {
-        name: brightness_for(name)
-        for name in defaults.keys()
-    }
-
-    # --- Body factory ---
-    def make(name: str, key: str) -> BodyConfig:
-        return BodyConfig(
-            name,
-            marker_radius_px=BODY_MARKER_RADIUS_PX[key],
-            brightness=brightness_for(key),
-            trail_step_minutes=_scaled_trail_step_minutes(
-                TRAIL_STEP_BODY_MULTIPLIERS[key]
-            ),
-        )
-
-    return {
-        "sun": BodyConfig("sun", marker_radius_px=BODY_MARKER_RADIUS_PX["sun"], brightness=brightness_for("sun"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["sun"])),
-        "moon": BodyConfig("moon", marker_radius_px=BODY_MARKER_RADIUS_PX["moon"], brightness=brightness_for("moon"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["moon"])),
-        "mercury": BodyConfig("mercury", marker_radius_px=BODY_MARKER_RADIUS_PX["mercury"], brightness=brightness_for("mercury"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["mercury"])),
-        "venus": BodyConfig("venus", marker_radius_px=BODY_MARKER_RADIUS_PX["venus"], brightness=brightness_for("venus"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["venus"])),
-        "earth": BodyConfig("earth", marker_radius_px=BODY_MARKER_RADIUS_PX["earth"], brightness=brightness_for("earth"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["earth"])),
-        "mars": BodyConfig("mars barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["mars"], brightness=brightness_for("mars"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["mars"])),
-        "jupiter": BodyConfig("jupiter barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["jupiter"], brightness=brightness_for("jupiter"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["jupiter"])),
-        "saturn": BodyConfig("saturn barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["saturn"], brightness=brightness_for("saturn"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["saturn"])),
-        "uranus": BodyConfig("uranus barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["uranus"], brightness=brightness_for("uranus"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["uranus"])),
-        "neptune": BodyConfig("neptune barycenter", marker_radius_px=BODY_MARKER_RADIUS_PX["neptune"], brightness=brightness_for("neptune"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["neptune"])),
-        "ceres": BodyConfig("ceres", marker_radius_px=BODY_MARKER_RADIUS_PX["ceres"], brightness=brightness_for("ceres"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["ceres"])),
-        "pluto": BodyConfig("pluto", marker_radius_px=BODY_MARKER_RADIUS_PX["pluto"], brightness=brightness_for("pluto"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["pluto"])),
-        "eris": BodyConfig("eris", marker_radius_px=BODY_MARKER_RADIUS_PX["eris"], brightness=brightness_for("eris"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["eris"])),
-        "haumea": BodyConfig("haumea", marker_radius_px=BODY_MARKER_RADIUS_PX["haumea"], brightness=brightness_for("haumea"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["haumea"])),
-        "makemake": BodyConfig("makemake", marker_radius_px=BODY_MARKER_RADIUS_PX["makemake"], brightness=brightness_for("makemake"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["makemake"])),
-        "gonggong": BodyConfig("gonggong", marker_radius_px=BODY_MARKER_RADIUS_PX["gonggong"], brightness=brightness_for("gonggong"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["gonggong"])),
-        "quaoar": BodyConfig("quaoar", marker_radius_px=BODY_MARKER_RADIUS_PX["quaoar"], brightness=brightness_for("quaoar"), trail_step_minutes=_scaled_trail_step_minutes(TRAIL_STEP_BODY_MULTIPLIERS["quaoar"])),
-    }
+    bodies, glow_brightness = _build_bodies_via_factory(
+        project_root=PROJECT_ROOT,
+        defaults=defaults,
+        body_targets=BODY_TARGETS,
+        marker_radius_px=BODY_MARKER_RADIUS_PX,
+        step_body_multipliers=TRAIL_STEP_BODY_MULTIPLIERS,
+        scaled_trail_step_minutes=_scaled_trail_step_minutes,
+        body_config_factory=BodyConfig,
+    )
+    BODY_GLOW_BRIGHTNESS = glow_brightness
+    return bodies
 
 
 # Bodies to include in render order
@@ -304,62 +272,27 @@ MAJOR_PLANET_TARGETS = {"mercury", "venus", "earth", "mars", "jupiter", "saturn"
 ALL_PLANETS_TARGETS = PLANET_TARGETS | DWARF_PLANET_TARGETS
 
 def _selector_set(key: str) -> set[str]:
-    token = "".join(ch for ch in str(key).lower() if ch.isalnum())
-    selectors: dict[str, set[str]] = {
-        "all": set(ALL_BODIES.keys()),
-        "bodies": set(ALL_BODIES.keys()),
-        "planets": set(MAJOR_PLANET_TARGETS),
-        "allplanets": set(ALL_PLANETS_TARGETS),
-        "majorplanets": set(MAJOR_PLANET_TARGETS),
-        "innerplanets": set(INNER_PLANET_TARGETS),
-        "outerplanets": set(OUTER_PLANET_TARGETS),
-        "dwarfplanets": set(DWARF_PLANET_TARGETS),
-    }
-
-    if token in selectors:
-        return selectors[token]
-    if token in ALL_BODIES:
-        return {token}
-    raise ValueError(f"Unknown selection term: {key}")
+    return _selector_set_impl(
+        key,
+        all_body_keys=set(ALL_BODIES.keys()),
+        major_planets=set(MAJOR_PLANET_TARGETS),
+        all_planets=set(ALL_PLANETS_TARGETS),
+        inner_planets=set(INNER_PLANET_TARGETS),
+        outer_planets=set(OUTER_PLANET_TARGETS),
+        dwarf_planets=set(DWARF_PLANET_TARGETS),
+    )
 
 
 def _evaluate_selection_expression(expr: str) -> set[str]:
-    text = str(expr).replace("(", " ").replace(")", " ")
-    words = [w for w in text.split() if w]
-    if not words:
-        return set(ALL_BODIES.keys())
-
-    operators = {"and", "or", "not", "except"}
-    selected: set[str] | None = None
-    op = "add"
-    i = 0
-    while i < len(words):
-        w = words[i].lower()
-        if w in ("and", "or"):
-            op = "add"
-            i += 1
-            continue
-        if w in ("not", "except"):
-            op = "sub"
-            i += 1
-            continue
-
-        start = i
-        while i < len(words) and words[i].lower() not in operators:
-            i += 1
-        term = " ".join(words[start:i])
-        term_set = _selector_set(term)
-
-        if selected is None:
-            selected = set(term_set)
-            if op == "sub":
-                selected = set(ALL_BODIES.keys()) - selected
-        elif op == "sub":
-            selected -= term_set
-        else:
-            selected |= term_set
-
-    return selected if selected is not None else set(ALL_BODIES.keys())
+    return _evaluate_selection_expression_impl(
+        expr,
+        all_body_keys=set(ALL_BODIES.keys()),
+        major_planets=set(MAJOR_PLANET_TARGETS),
+        all_planets=set(ALL_PLANETS_TARGETS),
+        inner_planets=set(INNER_PLANET_TARGETS),
+        outer_planets=set(OUTER_PLANET_TARGETS),
+        dwarf_planets=set(DWARF_PLANET_TARGETS),
+    )
 
 
 def _select_bodies() -> dict[str, BodyConfig]:
@@ -381,33 +314,49 @@ def _select_bodies() -> dict[str, BodyConfig]:
 
 BODIES: dict[str, BodyConfig] = _select_bodies()
 
+_SELECTION_EXPR_UNSET = object()
 
-def set_render_inner_planets_only(enabled: bool) -> None:
-    global RENDER_INNER_PLANETS_ONLY, RENDER_PLANETS_ONLY, RENDER_SELECTION_EXPRESSION, BODIES
-    RENDER_INNER_PLANETS_ONLY = bool(enabled)
-    if RENDER_INNER_PLANETS_ONLY:
-        RENDER_PLANETS_ONLY = False
-        RENDER_SELECTION_EXPRESSION = None
+
+def _refresh_selected_bodies() -> None:
+    global BODIES
     BODIES = _select_bodies()
 
 
-def set_render_planets_only(enabled: bool) -> None:
-    global RENDER_PLANETS_ONLY, RENDER_INNER_PLANETS_ONLY, RENDER_SELECTION_EXPRESSION, BODIES
-    RENDER_PLANETS_ONLY = bool(enabled)
-    if RENDER_PLANETS_ONLY:
-        RENDER_INNER_PLANETS_ONLY = False
-        RENDER_SELECTION_EXPRESSION = None
-    BODIES = _select_bodies()
+def _set_render_mode(
+    *,
+    inner_planets_only: bool | None = None,
+    planets_only: bool | None = None,
+    selection_expression: str | None | object = _SELECTION_EXPR_UNSET,
+) -> None:
+    global RENDER_PLANETS_ONLY, RENDER_INNER_PLANETS_ONLY, RENDER_SELECTION_EXPRESSION
+
+    if inner_planets_only is not None:
+        RENDER_INNER_PLANETS_ONLY = bool(inner_planets_only)
+        if RENDER_INNER_PLANETS_ONLY:
+            RENDER_PLANETS_ONLY = False
+            RENDER_SELECTION_EXPRESSION = None
+
+    if planets_only is not None:
+        RENDER_PLANETS_ONLY = bool(planets_only)
+        if RENDER_PLANETS_ONLY:
+            RENDER_INNER_PLANETS_ONLY = False
+            RENDER_SELECTION_EXPRESSION = None
+
+    if selection_expression is not _SELECTION_EXPR_UNSET:
+        text = None if selection_expression is None else str(selection_expression).strip()
+        RENDER_SELECTION_EXPRESSION = text if text else None
+        if RENDER_SELECTION_EXPRESSION is not None:
+            RENDER_PLANETS_ONLY = False
+            RENDER_INNER_PLANETS_ONLY = False
+
+    _refresh_selected_bodies()
+
+
+
 
 
 def set_render_selection_expression(expr: str | None) -> None:
-    global RENDER_SELECTION_EXPRESSION, RENDER_PLANETS_ONLY, RENDER_INNER_PLANETS_ONLY, BODIES
-    text = None if expr is None else str(expr).strip()
-    RENDER_SELECTION_EXPRESSION = text if text else None
-    if RENDER_SELECTION_EXPRESSION is not None:
-        RENDER_PLANETS_ONLY = False
-        RENDER_INNER_PLANETS_ONLY = False
-    BODIES = _select_bodies()
+    _set_render_mode(selection_expression=expr)
 
 
 def selection_expression_includes_body(expr: str, body_name: str) -> bool:
@@ -429,9 +378,9 @@ def set_observer_center_body(body_name: str) -> None:
 
 
 def _rebuild_body_configs() -> None:
-    global ALL_BODIES, BODIES
+    global ALL_BODIES
     ALL_BODIES = _build_all_bodies()
-    BODIES = _select_bodies()
+    _refresh_selected_bodies()
 
 
 def set_trail_sampling(*, scale: float | None = None, base_resolution_factor: float | None = None) -> None:

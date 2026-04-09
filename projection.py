@@ -7,7 +7,7 @@ from functools import lru_cache
 import math
 
 import config
-from ephemeris import BodyState
+from ephemeris_types import BodyState
 
 
 @dataclass(frozen=True)

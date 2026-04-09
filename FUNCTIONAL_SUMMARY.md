@@ -1,14 +1,19 @@
-# Functional Summary of Existing Programs
+# Functional Summary
 
-This document summarizes the top-layer behavior and responsibilities of all project-owned `.py` and `.ps1` files in the original implementation.
+This document summarizes the top-layer behavior and responsibilities of the current active-development implementation.
 
 ## System-level flow
 
-1. `run_wallpaper.ps1` is the operational entrypoint for manual runs and scheduled runs.
+1. `run_wallpaper.ps1` is the operational entrypoint for manual runs.
 2. It assembles effective args (from config + CLI), optionally performs center-body cycling and/or rotation transforms, then invokes `main.py`.
-3. `main.py` mutates runtime config, decides whether rendering is needed, computes ephemeris and projection, then renders `geocentric.png`.
+3. `main.py` mutates runtime config, decides whether rendering is needed, computes ephemeris and projection, then renders `wallpaper.png`.
 4. `set_geocentric_wallpaper.ps1` applies the generated image as Windows wallpaper.
 5. `setup_wallpaper_scheduler.ps1` installs and maintains a scheduled task that runs `run_wallpaper.ps1` hidden via VBScript.
+
+Supported operational entrypoint commands are:
+
+- `.\run_wallpaper.ps1 -MainArgs "-Rotate"`
+- `.\setup_wallpaper_scheduler.ps1 -TaskName "SolarWallpaperAutoUpdate" -IntervalMinutes 60 -MainArgs "--selection", "innerplanets AND ceres", "-Rotate"`
 
 ---
 
@@ -38,7 +43,7 @@ Top-layer purpose:
 Main functionality:
 - Defines orbital elements for Ceres, Pluto, Eris, Haumea, Makemake, Gonggong, Quaoar.
 - Solves Kepler equation and computes heliocentric position at a datetime.
-- Produces geocentric vectors by subtracting Earth heliocentric vector.
+- Produces vectors by subtracting Earth heliocentric vector.
 - Supports both single-sample and trail vector generation.
 
 Key side effects:
@@ -105,7 +110,7 @@ Main functionality:
 - Performs SSAA downsampling and writes final output PNG.
 
 Key side effects:
-- Writes `geocentric.png`.
+- Writes `wallpaper.png`.
 - Reads/writes trail layer cache files.
 - Reads/writes overlay signature state file.
 
@@ -171,7 +176,7 @@ Key side effects:
 - Writes scheduler config JSON.
 - Registers/unregisters scheduled task.
 
-## `set_geocentric_wallpaper.ps1`
+## `set_wallpaper.ps1`
 
 Top-layer purpose:
 - Applies a PNG/JPG file as desktop wallpaper in Windows.
@@ -194,4 +199,4 @@ Key side effects:
 3. Trail rendering (many line draws at SSAA resolution).
 4. PowerShell argument orchestration overhead and correctness.
 
-These areas are the primary focus for the rewrite under `optimized_rewrite/` while preserving behavior.
+These areas are the primary focus for ongoing active development.

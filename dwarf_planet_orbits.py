@@ -98,28 +98,6 @@ def _heliocentric_position(elements: OrbitalElements, at_time: datetime) -> np.n
     return np.asarray([x, y, z], dtype=float)
 
 
-def get_geocentric_position_au(name: str, at_time: datetime, earth_heliocentric_au: np.ndarray) -> np.ndarray:
-    elements = DWARF_PLANET_ORBITS[name.lower()]
-    return _heliocentric_position(elements, at_time) - earth_heliocentric_au
-
-
-def get_geocentric_trail_vectors(
-    name: str,
-    datetimes: list[datetime],
-    earth_heliocentric_vectors: list[np.ndarray],
-) -> list[np.ndarray]:
-    elements = DWARF_PLANET_ORBITS[name.lower()]
-    trail: list[np.ndarray] = []
-    for at_time, earth_vec in zip(datetimes, earth_heliocentric_vectors):
-        trail.append(_heliocentric_position(elements, at_time) - earth_vec)
-    return trail
-
-
-def get_heliocentric_position_au(name: str, at_time: datetime) -> np.ndarray:
-    elements = DWARF_PLANET_ORBITS[name.lower()]
-    return _heliocentric_position(elements, at_time)
-
-
 def get_heliocentric_trail_vectors(name: str, datetimes: list[datetime]) -> list[np.ndarray]:
     elements = DWARF_PLANET_ORBITS[name.lower()]
     return [_heliocentric_position(elements, at_time) for at_time in datetimes]

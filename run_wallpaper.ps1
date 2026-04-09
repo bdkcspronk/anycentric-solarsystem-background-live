@@ -7,8 +7,6 @@ param(
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$scriptDirName = Split-Path -Leaf $scriptDir
-$projectRoot = if ($scriptDirName -ieq "optimized_rewrite") { Split-Path -Parent $scriptDir } else { $scriptDir }
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $scriptDir "wallpaper_scheduler_config.json"
 }
@@ -16,9 +14,7 @@ $cycleStatePath = Join-Path $scriptDir "wallpaper_cycle_state.json"
 $rotationStatePath = Join-Path $scriptDir "wallpaper_rotation_state.json"
 $cycleCacheDir = Join-Path $scriptDir "wallpaper_cycle_cache"
 
-$pythonExe = Join-Path $projectRoot ".venv\Scripts\python.exe"
-$localPythonExe = Join-Path $scriptDir ".venv\Scripts\python.exe"
-$pythonExe = if (Test-Path $pythonExe) { $pythonExe } else { $localPythonExe }
+$pythonExe = Join-Path $scriptDir ".venv\Scripts\python.exe"
 $mainPy = Join-Path $scriptDir "main.py"
 
 if (-not (Test-Path $pythonExe)) {
@@ -433,7 +429,7 @@ if ($VerboseLog) {
     }
 }
 
-$imagePath = Join-Path $projectRoot "geocentric.png"
+$imagePath = Join-Path $scriptDir "wallpaper.png"
 if ($null -eq $cacheHitImagePath) {
     & $pythonExe $mainPy @forwardArgs
     if ($LASTEXITCODE -ne 0) {
@@ -459,7 +455,7 @@ if ($null -eq $cacheHitImagePath) {
     $imagePath = $cacheHitImagePath
 }
 
-$setter = Join-Path $scriptDir "set_geocentric_wallpaper.ps1"
+$setter = Join-Path $scriptDir "set_wallpaper.ps1"
 if (-not (Test-Path $setter)) {
     throw "Wallpaper setter not found: $setter"
 }

@@ -1,6 +1,6 @@
 [CmdletBinding(SupportsShouldProcess=$true)]
 param(
-    [string]$ImagePath = "geocentric.png"
+    [string]$ImagePath = "wallpaper.png"
 )
 
 $ErrorActionPreference = "Stop"
