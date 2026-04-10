@@ -47,9 +47,7 @@ def _save_output_image(image: Image.Image, output_path: str) -> None:
         raise last_err
 
 
-def render_wallpaper(projected: dict[str, ProjectedBody], at_time: datetime) -> Image.Image:
-    del at_time
-
+def _render_wallpaper_cpu(projected: dict[str, ProjectedBody]) -> Image.Image:
     ssaa_scale = max(1, int(config.SSAA_SCALE))
     render_width = config.IMAGE_WIDTH * ssaa_scale
     render_height = config.IMAGE_HEIGHT * ssaa_scale
@@ -64,6 +62,13 @@ def render_wallpaper(projected: dict[str, ProjectedBody], at_time: datetime) -> 
 
     if ssaa_scale > 1:
         image = image.resize((config.IMAGE_WIDTH, config.IMAGE_HEIGHT), resample=Image.Resampling.LANCZOS)
+
+    return image
+
+
+def render_wallpaper(projected: dict[str, ProjectedBody], at_time: datetime) -> Image.Image:
+    del at_time
+    image = _render_wallpaper_cpu(projected)
 
     _save_output_image(image, config.OUTPUT_PATH)
     mark_overlay_rendered()

@@ -31,6 +31,8 @@ class RunOptions:
     trail_step_scale: float | None = None
     orbit_radius_mode: str | None = None
     orbit_radius_power: float | None = None
+    marker_size_mode: str | None = None
+    marker_gamma: float | None = None
     center_body: str | None = None
     selection_expression: str | None = None
     bg_color: tuple[int, int, int] | None = None
@@ -104,6 +106,10 @@ def _apply_runtime_config(options: RunOptions) -> None:
         config.ORBIT_RADIUS_MODE = str(options.orbit_radius_mode).strip().lower()
     if options.orbit_radius_power is not None:
         config.ORBIT_RADIUS_POWER = float(options.orbit_radius_power)
+    if options.marker_size_mode is not None:
+        config.BODY_MARKER_SIZE_MODE = str(options.marker_size_mode).strip().lower()
+    if options.marker_gamma is not None:
+        config.BODY_MARKER_RADIUS_POWER_FACTOR = max(0.5, float(options.marker_gamma))
     if options.selection_expression is not None:
         config.set_render_selection_expression(options.selection_expression)
     else:
@@ -167,6 +173,8 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
         trail_step_scale=args.trail_step_scale,
         orbit_radius_mode=args.orbit_radius_mode,
         orbit_radius_power=args.orbit_radius_power,
+        marker_size_mode=args.marker_size_mode,
+        marker_gamma=args.marker_gamma,
         center_body=args.center_body,
         selection_expression=args.selection,
         bg_color=args.bg_color,
@@ -191,6 +199,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--trail-step-scale", type=float, default=1.0, help="Trail scale factor: sets TRAIL_DAYS=365.25*BODY_SOLAR_YEAR_FACTOR[center]*scale and scales trail step minutes for all bodies",)
     parser.add_argument("--orbit-radius-mode", type=str, default='power', help="Orbit radius remap mode: linear, sqrt, log, power",)
     parser.add_argument("--orbit-radius-power", type=float, default=0.5, help="Exponent used when orbit radius mode is power",)
+    parser.add_argument("--marker-size-mode", type=str, choices=("linear", "angular"), default=None, help="Marker size mode: linear (radius) or angular (apparent size from center body)",)
+    parser.add_argument("--marker-gamma", type=float, default=None, help="Marker gamma factor. Applied as metric ** (1/gamma), clamped to gamma >= 0.5",)
     parser.add_argument("--center-body", type=str, default="venus", help="Observer center body key (e.g. earth, sun, moon, mars)",)
     parser.add_argument("--selection", type=str, default='innerplanets', help="Body selection expression. Examples: 'planets AND moon', 'dwarf planets AND outer planets'. Sun is always included.",)
     parser.add_argument("--bg-color", type=_parse_color, default=None, help="Background color name or hex code (e.g. 'black' or '#ff00ff')")

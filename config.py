@@ -124,6 +124,15 @@ def _recompute_trail_timing() -> None:
     TRAIL_STEP_MINUTES = max(1, int(round(TRAIL_BASE_STEP_MINUTES * TRAIL_STEP_SCALE)))
 
 BODY_MARKER_SCALE = 10
+# Marker sizing mode:
+# - linear: use physical radii normalized by the Sun
+# - angular: use apparent angular size from the center body, normalized by
+#   the largest non-center angular body in the active render set.
+BODY_MARKER_SIZE_MODE = "linear"
+# Center body has zero observer distance, so angular size is undefined.
+# Keep center body marker on linear metric and optionally pass that metric
+# through the orbit-radius visual mapping.
+BODY_MARKER_CENTER_MAP_WITH_ORBIT_MODE = True
 # Marker radius transform factor.
 # Effective transform is radius ** (1 / factor) and factor is clamped to >= 0.5.
 # - Larger values flatten size differences (approach equal marker sizes).
@@ -171,11 +180,11 @@ BODY_SOLAR_YEAR_FACTOR: dict[str, float] = {
     "neptune": 164.79,
     "ceres": 4.60,
     "pluto": 247.94,
-    "eris": 557.2,
-    "haumea": 285.4,
-    "makemake": 309.9,
-    "gonggong": 554.4,
-    "quaoar": 286.8,
+    "eris": 30,
+    "haumea": 50,
+    "makemake": 70,
+    "gonggong": 60,
+    "quaoar": 40,
 }
 
 _recompute_trail_timing()

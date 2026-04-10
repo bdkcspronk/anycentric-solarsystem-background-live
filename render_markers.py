@@ -39,6 +39,77 @@ def _resolve_marker_color(
     return (bv, bv, bv)
 
 
+def _apply_orbit_radius_mapping(value: float) -> float:
+    v = max(0.0, float(value))
+    mode = str(config.ORBIT_RADIUS_MODE).strip().lower()
+    if mode == "power":
+        return v ** max(1e-6, float(config.ORBIT_RADIUS_POWER))
+    if mode == "sqrt":
+        return math.sqrt(v)
+    if mode == "log":
+        return math.log1p(v)
+    return v
+
+
+def _marker_gamma_exponent() -> float:
+    factor = max(0.5, float(config.BODY_MARKER_RADIUS_POWER_FACTOR))
+    return 1.0 / factor
+
+
+def _linear_marker_metric(name: str, center_name: str) -> float:
+    metric = max(0.0, float(config.BODY_MARKER_RADIUS.get(name, 0.0)))
+    if name == center_name and bool(getattr(config, "BODY_MARKER_CENTER_MAP_WITH_ORBIT_MODE", True)):
+        return _apply_orbit_radius_mapping(metric)
+    return metric
+
+
+def _build_angular_marker_metrics(
+    projected: dict[str, ProjectedBody],
+    center_name: str,
+) -> dict[str, float]:
+    angular_raw: dict[str, float] = {}
+
+    for name in config.BODIES:
+        if name == center_name:
+            continue
+
+        body = projected.get(name)
+        if body is None:
+            continue
+
+        x_au, y_au, z_au = body.position_au
+        distance_au = math.sqrt((x_au * x_au) + (y_au * y_au) + (z_au * z_au))
+        if distance_au <= 1e-12:
+            angular_raw[name] = 0.0
+            continue
+
+        radius_ratio_to_sun = max(0.0, float(config.BODY_MARKER_RADIUS.get(name, 0.0)))
+        angular_raw[name] = radius_ratio_to_sun / distance_au
+
+    max_angular = max(angular_raw.values(), default=0.0)
+    if max_angular <= 1e-12:
+        return {name: 0.0 for name in angular_raw}
+
+    return {name: (value / max_angular) for name, value in angular_raw.items()}
+
+
+def _resolve_marker_radius(
+    name: str,
+    center_name: str,
+    angular_metrics: dict[str, float],
+    ssaa_scale: int,
+) -> float:
+    mode = str(getattr(config, "BODY_MARKER_SIZE_MODE", "linear")).strip().lower()
+    if mode == "angular" and name != center_name:
+        metric = max(0.0, float(angular_metrics.get(name, 0.0)))
+    else:
+        metric = _linear_marker_metric(name, center_name)
+
+    marker_scale = max(0.0, float(config.BODY_MARKER_SCALE))
+    radius_px = (metric ** _marker_gamma_exponent()) * marker_scale
+    return radius_px * ssaa_scale
+
+
 def _build_marker_rows(
     projected: dict[str, ProjectedBody],
     kin_bundle: TrailKinematicsBundle,
@@ -46,11 +117,12 @@ def _build_marker_rows(
 ) -> list[MarkerRow]:
     rows: list[MarkerRow] = []
     center_name = str(config.OBSERVER_CENTER_BODY).strip().lower()
+    angular_metrics = _build_angular_marker_metrics(projected, center_name)
 
     for name, body_cfg in config.BODIES.items():
         body = projected[name]
         sx, sy = _scale_position(body.position_xy, ssaa_scale)
-        r = body_cfg.marker_radius_px * ssaa_scale
+        r = _resolve_marker_radius(name, center_name, angular_metrics, ssaa_scale)
         color = _resolve_marker_color(name, body_cfg, kin_bundle, center_name)
         rows.append((name, body, body_cfg, sx, sy, r, color))
 
@@ -176,14 +248,15 @@ def _compute_label_offset(
     dir_y: float,
     label_w: int,
     label_h: int,
-    body_cfg: config.BodyConfig,
     marker_r: float,
     ssaa_scale: int,
 ) -> float:
     dir_clearance = 0.5 * (abs(dir_x) * label_w + abs(dir_y) * label_h)
 
+    marker_radius_px = marker_r / max(1, ssaa_scale)
+
     base_gap = (
-        math.sqrt(max(1.0, float(body_cfg.marker_radius_px)))
+        math.sqrt(max(1.0, float(marker_radius_px)))
         * ssaa_scale
         * max(0.0, float(config.LABEL_OFFSET_RADIUS_MULTIPLIER))
     )
@@ -196,7 +269,6 @@ def _draw_single_label(
     draw: ImageDraw.ImageDraw,
     name: str,
     body: ProjectedBody,
-    body_cfg: config.BodyConfig,
     sx: float,
     sy: float,
     r: float,
@@ -205,7 +277,8 @@ def _draw_single_label(
     ssaa_scale: int,
 ) -> None:
     text_scale = max(0.1, float(config.TEXT_SCALE))
-    label_radius = math.sqrt(max(1.0, float(body_cfg.marker_radius_px))) * ssaa_scale
+    marker_radius_px = r / max(1, ssaa_scale)
+    label_radius = math.sqrt(max(1.0, float(marker_radius_px))) * ssaa_scale
 
     label_size = max(8, int(round(label_radius * 1.8 * text_scale)))
     font = get_label_font(label_size)
@@ -216,7 +289,7 @@ def _draw_single_label(
     bbox = draw.textbbox((0, 0), text, font=font)
     label_w, label_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-    offset = _compute_label_offset(dir_x, dir_y, label_w, label_h, body_cfg, r, ssaa_scale)
+    offset = _compute_label_offset(dir_x, dir_y, label_w, label_h, r, ssaa_scale)
     anchor_x = sx + dir_x * offset
     anchor_y = sy + dir_y * offset
 
@@ -234,13 +307,13 @@ def _draw_labels(image: Image.Image, marker_rows: list[MarkerRow], center_name: 
 
     label_accum = Image.new("RGB", image.size, (0, 0, 0))
 
-    for name, body, body_cfg, sx, sy, r, color in marker_rows:
+    for name, body, _, sx, sy, r, color in marker_rows:
         if name == "sun":
             continue
 
         label_layer = Image.new("RGB", image.size, (0, 0, 0))
         draw = ImageDraw.Draw(label_layer)
-        _draw_single_label(draw, name, body, body_cfg, sx, sy, r, color, center_name, ssaa_scale)
+        _draw_single_label(draw, name, body, sx, sy, r, color, center_name, ssaa_scale)
         label_accum = ImageChops.add(label_accum, label_layer)
 
     image.paste(ImageChops.add(image, label_accum))
