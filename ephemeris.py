@@ -37,7 +37,7 @@ def is_trail_update_due(at_time) -> bool:
             continue
 
         step_minutes = body_cfg.trail_step_minutes or config.TRAIL_STEP_MINUTES
-        sample_count = trail_sample_count(step_minutes, utc_time)
+        sample_count = trail_sample_count(step_minutes, utc_time, body_name=name)
         aligned_now = align_time_to_step(utc_time, step_minutes)
 
         record = cache_bodies.get(name)
@@ -82,13 +82,14 @@ def get_body_states(at_time) -> dict[str, BodyState]:
     states: dict[str, BodyState] = {}
     for name, body_cfg in config.BODIES.items():
         step_minutes = body_cfg.trail_step_minutes or config.TRAIL_STEP_MINUTES
-        sample_count = trail_sample_count(step_minutes, utc_time)
 
         if body_cfg.target.lower() == center_target:
             cache_bodies.pop(name, None)
-            trail = [np.zeros(3, dtype=float) for _ in range(sample_count)]
+            # Center body is stationary in the relative frame; it needs no trail segments.
+            trail = [np.zeros(3, dtype=float)]
             position_vec = np.zeros(3, dtype=float)
         else:
+            sample_count = trail_sample_count(step_minutes, utc_time, body_name=name)
             aligned_now = align_time_to_step(utc_time, step_minutes)
             trail = build_or_update_trail(
                 body_name=name,

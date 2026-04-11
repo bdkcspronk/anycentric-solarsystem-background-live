@@ -27,6 +27,175 @@ def _trail_cache_paths() -> tuple[str, str]:
     )
 
 
+def _clamp01(x: float) -> float:
+    return max(0.0, min(1.0, float(x)))
+
+
+def _distance_point_to_segment(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
+    abx = bx - ax
+    aby = by - ay
+    apx = px - ax
+    apy = py - ay
+    denom = (abx * abx) + (aby * aby)
+    if denom <= 1e-12:
+        return math.hypot(px - ax, py - ay)
+    t = _clamp01(((apx * abx) + (apy * aby)) / denom)
+    nx = ax + (abx * t)
+    ny = ay + (aby * t)
+    return math.hypot(px - nx, py - ny)
+
+
+def _bend_degrees(ax: float, ay: float, bx: float, by: float, cx: float, cy: float) -> float:
+    v0x = bx - ax
+    v0y = by - ay
+    v1x = cx - bx
+    v1y = cy - by
+    m0 = math.hypot(v0x, v0y)
+    m1 = math.hypot(v1x, v1y)
+    if m0 <= 1e-12 or m1 <= 1e-12:
+        return 0.0
+    dot = (v0x * v1x + v0y * v1y) / (m0 * m1)
+    dot = max(-1.0, min(1.0, dot))
+    return math.degrees(math.acos(dot))
+
+
+def _initial_coarse_indices(point_count: int, coarse_segments: int) -> list[int]:
+    if point_count <= 2:
+        return [0, max(0, point_count - 1)]
+
+    max_segment_count = max(1, point_count - 1)
+    segment_count = max(1, min(max_segment_count, int(coarse_segments)))
+    out = {0, point_count - 1}
+    for i in range(1, segment_count):
+        idx = int(round((i / float(segment_count)) * (point_count - 1)))
+        out.add(max(0, min(point_count - 1, idx)))
+    return sorted(out)
+
+
+def _adaptive_trail_indices(
+    trail_xy: list[tuple[float, float]],
+    ssaa_scale: int,
+    body_name: str,
+) -> tuple[list[int], bool]:
+    n = len(trail_xy)
+    if n <= 2 or not bool(getattr(config, "TRAIL_ADAPTIVE_RENDER", True)):
+        return (list(range(n)), False)
+
+    scale = float(max(1, int(ssaa_scale)))
+    points = [(p[0] * scale, p[1] * scale) for p in trail_xy]
+
+    coarse_segments = int(getattr(config, "TRAIL_ADAPTIVE_COARSE_SEGMENTS", 12))
+    max_segments = max(1, int(getattr(config, "TRAIL_ADAPTIVE_MAX_SEGMENTS_PER_BODY", 450)))
+    point_budget = max_segments + 1
+    max_error_px = float(getattr(config, "TRAIL_ADAPTIVE_MAX_ERROR_PX", 1.5)) * scale
+    min_bend_deg = float(getattr(config, "TRAIL_ADAPTIVE_MIN_BEND_DEG", 4.0))
+    min_segment_px = float(getattr(config, "TRAIL_ADAPTIVE_MIN_SEGMENT_PX", 3.0)) * scale
+
+    indices = _initial_coarse_indices(n, coarse_segments)
+    seg_budget = max(2, point_budget)
+
+    changed = True
+    while changed and len(indices) < seg_budget:
+        changed = False
+        next_indices = [indices[0]]
+
+        for k in range(len(indices) - 1):
+            i0 = indices[k]
+            i1 = indices[k + 1]
+            if i1 <= i0 + 1:
+                next_indices.append(i1)
+                continue
+
+            p0 = points[i0]
+            p1 = points[i1]
+            seg_len = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+            if seg_len <= min_segment_px:
+                next_indices.append(i1)
+                continue
+
+            im = (i0 + i1) // 2
+            pm = points[im]
+
+            error_px = _distance_point_to_segment(pm[0], pm[1], p0[0], p0[1], p1[0], p1[1])
+            bend_deg = _bend_degrees(p0[0], p0[1], pm[0], pm[1], p1[0], p1[1])
+
+            if (error_px > max_error_px or bend_deg > min_bend_deg) and len(next_indices) < seg_budget:
+                if im != next_indices[-1]:
+                    next_indices.append(im)
+                    changed = True
+
+            next_indices.append(i1)
+
+        indices = sorted(set(next_indices))
+
+    if len(indices) > point_budget:
+        # Keep endpoints and uniformly subsample interior points to honor cap.
+        keep: set[int] = {indices[0], indices[-1]}
+        if point_budget > 2:
+            interior = indices[1:-1]
+            picks = point_budget - 2
+            for i in range(picks):
+                src_idx = int(round((i / max(1, picks - 1)) * (len(interior) - 1)))
+                keep.add(interior[src_idx])
+        indices = sorted(keep)
+
+    hit_segment_cap = (len(indices) - 1) >= max_segments
+    if hit_segment_cap and bool(getattr(config, "VERBOSE_LOG", False)):
+        print(f"[adaptive-trail] {body_name} reached max segments per body ({max_segments})")
+
+    return (indices, hit_segment_cap)
+
+
+def _draw_debug_tangent_markers(
+    draw: ImageDraw.ImageDraw,
+    trail_xy: list[tuple[float, float]],
+    draw_indices: list[int],
+    ssaa_scale: int,
+) -> None:
+    if not bool(getattr(config, "TRAIL_DEBUG_SEGMENT_TANGENTS", False)):
+        return
+
+    scale = float(max(1, int(ssaa_scale)))
+    marker_len = max(1.0, float(getattr(config, "TRAIL_DEBUG_SEGMENT_TANGENT_LENGTH_PX", 28.0)) * scale)
+    marker_width = max(1, int(round(float(getattr(config, "TRAIL_DEBUG_SEGMENT_TANGENT_WIDTH_PX", 2.0)) * scale)))
+    raw_color = getattr(config, "TRAIL_DEBUG_SEGMENT_TANGENT_COLOR", (255, 255, 255))
+    color = tuple(int(max(0, min(255, c))) for c in raw_color)
+
+    if len(draw_indices) < 3:
+        return
+
+    half = 0.5 * marker_len
+    for j in range(1, len(draw_indices) - 1):
+        i_prev = draw_indices[j - 1]
+        i_mid = draw_indices[j]
+        i_next = draw_indices[j + 1]
+        if i_next <= i_prev:
+            continue
+
+        x_prev, y_prev = trail_xy[i_prev]
+        x_next, y_next = trail_xy[i_next]
+        dx = (x_next - x_prev) * scale
+        dy = (y_next - y_prev) * scale
+        mag = math.hypot(dx, dy)
+        if mag <= 1e-9:
+            continue
+
+        ux = dx / mag
+        uy = dy / mag
+        # Draw separator perpendicular to the local tangent.
+        nx = -uy
+        ny = ux
+        x_mid, y_mid = trail_xy[i_mid]
+        cx = x_mid * scale
+        cy = y_mid * scale
+
+        ax = cx - nx * half
+        ay = cy - ny * half
+        bx = cx + nx * half
+        by = cy + ny * half
+        draw.line((ax, ay, bx, by), fill=color, width=marker_width)
+
+
 def _trail_signature(
     projected: dict[str, ProjectedBody],
     kin_bundle: TrailKinematicsBundle,
@@ -48,6 +217,16 @@ def _trail_signature(
         "trail_brightness_angular_blend": config.TRAIL_BRIGHTNESS_ANGULAR_BLEND,
         "trail_min_fade": config.TRAIL_MIN_FADE,
         "trail_fade_power": config.TRAIL_FADE_POWER,
+        "trail_adaptive_render": bool(getattr(config, "TRAIL_ADAPTIVE_RENDER", True)),
+        "trail_adaptive_coarse_segments": int(getattr(config, "TRAIL_ADAPTIVE_COARSE_SEGMENTS", 12)),
+        "trail_adaptive_max_segments_per_body": int(getattr(config, "TRAIL_ADAPTIVE_MAX_SEGMENTS_PER_BODY", 450)),
+        "trail_adaptive_max_error_px": float(getattr(config, "TRAIL_ADAPTIVE_MAX_ERROR_PX", 1.5)),
+        "trail_adaptive_min_bend_deg": float(getattr(config, "TRAIL_ADAPTIVE_MIN_BEND_DEG", 4.0)),
+        "trail_adaptive_min_segment_px": float(getattr(config, "TRAIL_ADAPTIVE_MIN_SEGMENT_PX", 3.0)),
+        "trail_debug_segment_tangents": bool(getattr(config, "TRAIL_DEBUG_SEGMENT_TANGENTS", False)),
+        "trail_debug_segment_tangent_length_px": float(getattr(config, "TRAIL_DEBUG_SEGMENT_TANGENT_LENGTH_PX", 28.0)),
+        "trail_debug_segment_tangent_width_px": float(getattr(config, "TRAIL_DEBUG_SEGMENT_TANGENT_WIDTH_PX", 2.0)),
+        "trail_debug_segment_tangent_color": tuple(int(c) for c in getattr(config, "TRAIL_DEBUG_SEGMENT_TANGENT_COLOR", (255, 255, 255))),
         "bodies": list(config.BODIES.keys()),
     }
     h.update(json.dumps(header, sort_keys=True).encode("utf-8"))
@@ -158,16 +337,25 @@ def _render_trail_layers(
         if len(trail_xy) < 2 or not colors:
             continue
 
+        draw_indices, _hit_segment_cap = _adaptive_trail_indices(trail_xy, ssaa_scale, name)
+        if len(draw_indices) < 2:
+            continue
+
         body_layer = Image.new("RGB", (render_width, render_height), (0, 0, 0))
         d = ImageDraw.Draw(body_layer)
-        for i in range(len(trail_xy) - 1):
-            p0 = trail_xy[i]
-            p1 = trail_xy[i + 1]
+        for s in range(len(draw_indices) - 1):
+            i0 = draw_indices[s]
+            i1 = draw_indices[s + 1]
+            p0 = trail_xy[i0]
+            p1 = trail_xy[i1]
+            color_idx = max(0, min(len(colors) - 1, i0))
             d.line(
                 (p0[0] * ssaa_scale, p0[1] * ssaa_scale, p1[0] * ssaa_scale, p1[1] * ssaa_scale),
-                fill=colors[i],
+                fill=colors[color_idx],
                 width=line_width,
             )
+
+            _draw_debug_tangent_markers(d, trail_xy, draw_indices, ssaa_scale)
 
         if trail_xy and colors:
             tail = trail_xy[-1]

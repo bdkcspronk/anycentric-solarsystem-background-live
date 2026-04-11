@@ -46,8 +46,7 @@ def build_all_bodies(
     defaults: dict[str, float],
     body_targets: dict[str, str],
     marker_radius_px: dict[str, int],
-    step_body_multipliers: dict[str, int],
-    scaled_trail_step_minutes: Callable[[int], int],
+    trail_step_minutes_by_body: dict[str, int],
     body_config_factory: Callable[..., Any],
 ) -> tuple[dict[str, Any], dict[str, float]]:
     brightness_lookup = body_brightness_lookup(project_root, defaults)
@@ -62,7 +61,7 @@ def build_all_bodies(
             target,
             marker_radius_px=marker_radius_px[key],
             brightness=brightness_for(key),
-            trail_step_minutes=scaled_trail_step_minutes(step_body_multipliers[key]),
+            trail_step_minutes=int(trail_step_minutes_by_body[key]),
         )
         for key, target in body_targets.items()
     }

@@ -144,7 +144,10 @@ def _draw_single_glow(gdraw: ImageDraw.ImageDraw, sx: float, sy: float, r: float
     peak_alpha = int(round(88.0 * glow_strength))
     peak_alpha = max(0, min(128, peak_alpha))
 
-    rings = 32
+    # Use more rings for stronger/larger glows to keep gradient banding consistent.
+    strength_rings = int(round(18.0 + (70.0 * glow_strength)))
+    radius_rings = int(math.ceil(outer_r / 1.75))
+    rings = max(16, min(120, max(strength_rings, radius_rings)))
     for i in range(rings, 0, -1):
         t = i / float(rings)
         rr = outer_r * t

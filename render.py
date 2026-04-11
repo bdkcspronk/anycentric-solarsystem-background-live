@@ -13,6 +13,7 @@ from projection import ProjectedBody
 from render_celestial import draw_celestial_scale_overlay
 from render_markers import draw_markers
 from render_overlay_state import is_overlay_update_due, mark_overlay_rendered
+from render_view_overlay import draw_view_overlay
 from render_trail_layer import get_trail_layer_image
 from trail_kinematics import compute_or_load_kinematics
 
@@ -59,6 +60,8 @@ def _render_wallpaper_cpu(projected: dict[str, ProjectedBody]) -> Image.Image:
 
     draw_celestial_scale_overlay(image, projected, ssaa_scale)
     draw_markers(image, projected, kin_bundle, ssaa_scale)
+    if bool(getattr(config, "SHOW_ORIENTATION_OVERLAY", True)):
+        draw_view_overlay(image)
 
     if ssaa_scale > 1:
         image = image.resize((config.IMAGE_WIDTH, config.IMAGE_HEIGHT), resample=Image.Resampling.LANCZOS)

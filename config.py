@@ -30,6 +30,9 @@ OUTPUT_PATH = str(PROJECT_ROOT / "wallpaper.png")
 IMAGE_WIDTH = 2560
 IMAGE_HEIGHT = 1440
 
+# Anti-aliasing: render at higher resolution then downsample.
+SSAA_SCALE = 4
+
 # Scene and style settings
 # Background brightness (legacy). Keep for backwards compatibility.
 BACKGROUND_BRIGHTNESS = 1
@@ -42,6 +45,19 @@ TRAIL_LINE_WIDTH_PX = 2
 TRAIL_MIN_FADE = 0.0
 TRAIL_FADE_POWER = 1.0
 TRAIL_DYNAMIC_SATURATION = True
+VERBOSE_LOG = False
+# Adaptive trail rendering in projected screen space.
+TRAIL_ADAPTIVE_RENDER = True
+TRAIL_ADAPTIVE_COARSE_SEGMENTS = 50
+TRAIL_ADAPTIVE_MAX_SEGMENTS_PER_BODY = 2000
+TRAIL_ADAPTIVE_MAX_ERROR_PX = 1.0
+TRAIL_ADAPTIVE_MIN_BEND_DEG = 0.5
+TRAIL_ADAPTIVE_MIN_SEGMENT_PX = 3.0
+# Debug overlay: draw tangent markers at adaptive segment joints.
+TRAIL_DEBUG_SEGMENT_TANGENTS = False
+TRAIL_DEBUG_SEGMENT_TANGENT_LENGTH_PX = 5.0
+TRAIL_DEBUG_SEGMENT_TANGENT_WIDTH_PX = 2.0
+TRAIL_DEBUG_SEGMENT_TANGENT_COLOR = (255, 255, 255)
 # Blend for saturation metric when dynamic saturation is enabled:
 # 0.0 uses linear speed, 1.0 uses apparent angular speed.
 TRAIL_SATURATION_ANGULAR_BLEND = 0.0
@@ -50,6 +66,11 @@ TRAIL_BRIGHTNESS_ANGULAR_BLEND = 0.0
 
 SHOW_BODY_LABELS = False
 SHOW_MARKER_GLOW = True
+SHOW_ORIENTATION_OVERLAY = True
+# Orientation overlay vertical layout ratios (relative to overlay box content height).
+ORIENTATION_OVERLAY_TITLE_HEIGHT_RATIO = 0.18
+ORIENTATION_OVERLAY_GIMBAL_HEIGHT_RATIO = 0.54
+ORIENTATION_OVERLAY_RULER_HEIGHT_RATIO = 0.10
 TEXT_SCALE = 3.0
 LABEL_OFFSET_RADIUS_MULTIPLIER = 3.0
 SHOW_CELESTIAL_SCALE = True
@@ -61,9 +82,6 @@ CELESTIAL_SCALE_XY_COLOR = (120, 180, 255)
 CELESTIAL_SCALE_XZ_COLOR = (255, 180, 120)
 CELESTIAL_SCALE_YZ_COLOR = (180, 255, 170)
 CELESTIAL_SCALE_YZ_YAW_OFFSET_DEG = 0.0
-
-# Anti-aliasing: render at higher resolution then downsample.
-SSAA_SCALE = 4
 
 # Projection settings
 WORLD_RADIUS_AU = 4.0
@@ -111,6 +129,12 @@ EPHEMERIS_KERNEL = str(PROJECT_ROOT / "de440s.bsp")
 
 TRAIL_STEP_SCALE = 2
 TRAIL_BASE_RESOLUTION_FACTOR = 6
+
+# Optional per-body cap for trail lookback duration in days.
+# The Moon trail should be at most about one orbital period around Earth.
+BODY_TRAIL_MAX_DAYS: dict[str, float] = {
+    "moon": 27.321661,
+}
 
 def _current_center_solar_year_factor() -> float:
     key = str(OBSERVER_CENTER_BODY).strip().lower()
@@ -189,24 +213,25 @@ BODY_SOLAR_YEAR_FACTOR: dict[str, float] = {
 
 _recompute_trail_timing()
 
-TRAIL_STEP_BODY_MULTIPLIERS: dict[str, int] = {
-    "sun": 1,
-    "moon": 1,
-    "mercury": 1,
-    "venus": 1,
-    "earth": 1,
-    "mars": 1,
-    "jupiter": 4,
-    "saturn": 8,
-    "uranus": 16,
-    "neptune": 32,
-    "ceres": 2,
-    "pluto": 32,
-    "eris": 32,
-    "haumea": 32,
-    "makemake": 32,
-    "gonggong": 32,
-    "quaoar": 32,
+# Explicit trail cache sample cadence by body.
+TRAIL_STEP_MINUTES_BY_BODY: dict[str, int] = {
+    "sun": 60,
+    "moon": 30,
+    "mercury": 60,
+    "venus": 60,
+    "earth": 60,
+    "mars": 60,
+    "jupiter": 360,
+    "saturn": 360,
+    "uranus": 360,
+    "neptune": 360,
+    "ceres": 60,
+    "pluto": 720,
+    "eris": 1440,
+    "haumea": 1440,
+    "makemake": 1440,
+    "gonggong": 1440,
+    "quaoar": 1440,
 }
 
 BODY_TARGETS: dict[str, str] = {
@@ -232,12 +257,6 @@ BODY_TARGETS: dict[str, str] = {
 # Per-body glow strength source (0..1). This is intended to use the
 # normalized (non-gamma) brightness when available.
 BODY_GLOW_BRIGHTNESS: dict[str, float] = {}
-
-
-def _scaled_trail_step_minutes(multiplier: int) -> int:
-    return max(1, int(round(TRAIL_STEP_MINUTES * int(multiplier))))
-
-
 def _build_all_bodies() -> dict[str, BodyConfig]:
     defaults: dict[str, float] = {
         "sun": 1,
@@ -265,8 +284,7 @@ def _build_all_bodies() -> dict[str, BodyConfig]:
         defaults=defaults,
         body_targets=BODY_TARGETS,
         marker_radius_px=BODY_MARKER_RADIUS_PX,
-        step_body_multipliers=TRAIL_STEP_BODY_MULTIPLIERS,
-        scaled_trail_step_minutes=_scaled_trail_step_minutes,
+        trail_step_minutes_by_body=TRAIL_STEP_MINUTES_BY_BODY,
         body_config_factory=BodyConfig,
     )
     BODY_GLOW_BRIGHTNESS = glow_brightness
@@ -320,7 +338,13 @@ def _select_bodies() -> dict[str, BodyConfig]:
     # include the sun always
     selected_names.add("sun")
     # Always include the current center body so relative frame remains valid.
-    selected_names.add(str(OBSERVER_CENTER_BODY).strip().lower())
+    center_name = str(OBSERVER_CENTER_BODY).strip().lower()
+    selected_names.add(center_name)
+
+    # Keep Moon visibility tied to the Earth-Moon frame when both are selected.
+    if "earth" in selected_names and "moon" in selected_names and center_name not in {"earth", "moon"}:
+        selected_names.discard("moon")
+
     return {name: body for name, body in ALL_BODIES.items() if name in selected_names}
 
 

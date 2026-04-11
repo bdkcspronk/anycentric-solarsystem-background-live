@@ -166,30 +166,89 @@ function Remove-Arg {
     return @($result)
 }
 
-function Get-SelectedBodiesForExpression {
+function Get-SelectionCycleGroups {
     param([string]$SelectionExpr)
 
     $exprForPy = if ($null -eq $SelectionExpr) { "" } else { $SelectionExpr }
-    $scriptDirForPy = $scriptDir -replace "\\", "\\\\"
-    $code = @"
+    $code = @'
 import json
 import sys
 
-sys.path.insert(0, r'''$scriptDirForPy''')
+script_dir = sys.argv[1]
+expr = sys.argv[2] if len(sys.argv) > 2 else ''
+
+sys.path.insert(0, script_dir)
 import config
 
-expr = '''$exprForPy'''.strip()
-if expr:
-    selected = set(config._evaluate_selection_expression(expr))
-else:
-    # Mirror main.py default when no explicit selection is passed.
-    selected = set(config._evaluate_selection_expression('inner planets'))
 
-ordered = [name for name in config.ALL_BODIES.keys() if name in selected]
-print(json.dumps(ordered))
-"@
+def split_top_level_or(expr: str) -> list[str]:
+    text = str(expr or '').strip()
+    if not text:
+        return ['inner planets']
 
-    $raw = & $pythonExe -c $code
+    tokens = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch.isspace():
+            i += 1
+            continue
+        if ch in '()':
+            tokens.append(ch)
+            i += 1
+            continue
+        j = i
+        while j < n and (not text[j].isspace()) and text[j] not in '()':
+            j += 1
+        tokens.append(text[i:j])
+        i = j
+
+    parts: list[list[str]] = [[]]
+    depth = 0
+    for t in tokens:
+        lower = t.lower()
+        if t == '(':
+            depth += 1
+            parts[-1].append(t)
+            continue
+        if t == ')':
+            depth = max(0, depth - 1)
+            parts[-1].append(t)
+            continue
+        if lower == "or" and depth == 0:
+            parts.append([])
+            continue
+        parts[-1].append(t)
+
+    out = []
+    for p in parts:
+        item = ' '.join(p).strip()
+        if item:
+            out.append(item)
+    return out or ['inner planets']
+
+
+groups = split_top_level_or(expr)
+
+payload = []
+for gexpr in groups:
+    selected = set(config._evaluate_selection_expression(gexpr))
+    ordered = [name for name in config.ALL_BODIES.keys() if name in selected]
+    if 'sun' not in ordered:
+        ordered.append('sun')
+    payload.append({'expression': gexpr, 'bodies': ordered})
+
+print(json.dumps(payload))
+'@
+
+    $tempPy = [System.IO.Path]::GetTempFileName()
+    try {
+        Set-Content -Path $tempPy -Value $code -Encoding UTF8
+        $raw = & $pythonExe $tempPy $scriptDir $exprForPy
+    } finally {
+        Remove-Item -Path $tempPy -ErrorAction SilentlyContinue
+    }
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) {
         return @()
     }
@@ -200,47 +259,75 @@ print(json.dumps(ordered))
     }
 }
 
-function Get-NextCycledBody {
+function Get-NextCycledBodyFromGroups {
     param(
-        [string[]]$Bodies,
+        [object[]]$Groups,
         [string]$SelectionKey,
         [string]$StatePath
     )
-    if ($Bodies.Count -eq 0) {
+    if ($Groups.Count -eq 0) {
         return $null
     }
 
-    $idx = 0
+    $groupIdx = 0
+    $bodyIdx = 0
     $savedKey = ""
     if (Test-Path $StatePath) {
         try {
             $state = Get-Content -Raw -Path $StatePath | ConvertFrom-Json
-            if ($null -ne $state.index) {
-                $idx = [int]$state.index
-            }
-            if ($null -ne $state.selection_key) {
-                $savedKey = [string]$state.selection_key
-            }
+            if ($null -ne $state.group_index) { $groupIdx = [int]$state.group_index }
+            if ($null -ne $state.body_index) { $bodyIdx = [int]$state.body_index }
+            if ($null -ne $state.selection_key) { $savedKey = [string]$state.selection_key }
         } catch {
-            $idx = 0
+            $groupIdx = 0
+            $bodyIdx = 0
             $savedKey = ""
         }
     }
 
     if (-not $savedKey.Equals($SelectionKey, [System.StringComparison]::Ordinal)) {
-        $idx = 0
+        $groupIdx = 0
+        $bodyIdx = 0
     }
 
-    $idx = (($idx % $Bodies.Count) + $Bodies.Count) % $Bodies.Count
-    $body = $Bodies[$idx]
-    $nextIdx = ($idx + 1) % $Bodies.Count
+    $groupCount = $Groups.Count
+    $result = $null
+    for ($guard = 0; $guard -lt $groupCount; $guard++) {
+        $groupIdx = (($groupIdx % $groupCount) + $groupCount) % $groupCount
+        $group = $Groups[$groupIdx]
+        $bodies = @($group.bodies)
+        if ($bodies.Count -eq 0) {
+            $groupIdx = ($groupIdx + 1) % $groupCount
+            $bodyIdx = 0
+            continue
+        }
 
-    @{
-        selection_key = $SelectionKey
-        index = $nextIdx
-    } | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8
+        $bodyIdx = (($bodyIdx % $bodies.Count) + $bodies.Count) % $bodies.Count
+        $body = [string]$bodies[$bodyIdx]
 
-    return $body
+        $nextGroupIdx = $groupIdx
+        $nextBodyIdx = $bodyIdx + 1
+        if ($nextBodyIdx -ge $bodies.Count) {
+            $nextBodyIdx = 0
+            $nextGroupIdx = ($groupIdx + 1) % $groupCount
+        }
+
+        @{
+            selection_key = $SelectionKey
+            group_index = $nextGroupIdx
+            body_index = $nextBodyIdx
+        } | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8
+
+        $result = @{
+            body = $body
+            expression = [string]$group.expression
+            group_index = $groupIdx
+            group_count = $groupCount
+        }
+        break
+    }
+
+    return $result
 }
 
 function Parse-DoubleOrThrow {
@@ -330,20 +417,34 @@ if ($cycleEnabled -and -not (Test-HasArg -ArgList $forwardArgs -Name "center-bod
         $selectionExpr = "inner planets"
     }
 
-    $cycleBodies = Get-SelectedBodiesForExpression -SelectionExpr $selectionExpr
-    if (-not ($cycleBodies -contains "sun")) {
-        $cycleBodies += "sun"
+    $cycleGroups = Get-SelectionCycleGroups -SelectionExpr $selectionExpr
+    $flat = @()
+    for ($gi = 0; $gi -lt $cycleGroups.Count; $gi++) {
+        $g = $cycleGroups[$gi]
+        $flat += ("g=$gi|e=" + [string]$g.expression + "|b=" + (@($g.bodies) -join ","))
     }
-    $selectionKey = "$selectionExpr|$($cycleBodies -join ',')"
-    $nextBody = Get-NextCycledBody -Bodies $cycleBodies -SelectionKey $selectionKey -StatePath $cycleStatePath
-    if (-not [string]::IsNullOrWhiteSpace($nextBody)) {
+    $selectionKey = "$selectionExpr|$($flat -join ';')"
+    $nextCycle = Get-NextCycledBodyFromGroups -Groups $cycleGroups -SelectionKey $selectionKey -StatePath $cycleStatePath
+    if ($null -ne $nextCycle -and -not [string]::IsNullOrWhiteSpace([string]$nextCycle.body)) {
+        $activeExpr = [string]$nextCycle.expression
+        $nextBody = [string]$nextCycle.body
+
+        # Always use the active group expression for this cycle step.
+        $forwardArgs = @(Remove-Arg -ArgList $forwardArgs -Name "selection")
         if ($nextBody.Equals("sun", [System.StringComparison]::OrdinalIgnoreCase)) {
             # main.py requires center body to be explicitly included by selection expression.
-            $selectionWithSun = "($selectionExpr) OR sun"
-            $forwardArgs = @(Remove-Arg -ArgList $forwardArgs -Name "selection")
-            $forwardArgs = @($forwardArgs + @("--selection", $selectionWithSun))
+            $activeExpr = "($activeExpr) OR sun"
         }
+        $forwardArgs = @($forwardArgs + @("--selection", $activeExpr))
         $forwardArgs = @($forwardArgs + @("--center-body=$nextBody"))
+
+        if ($VerboseLog) {
+            $groupDisplay = ([int]$nextCycle.group_index + 1)
+            $groupCount = [int]$nextCycle.group_count
+            Write-Host "Cycle group: $groupDisplay/$groupCount"
+            Write-Host "Cycle expression: $activeExpr"
+            Write-Host "Cycle center-body: $nextBody"
+        }
     }
 }
 
@@ -431,7 +532,11 @@ if ($VerboseLog) {
 
 $imagePath = Join-Path $scriptDir "wallpaper.png"
 if ($null -eq $cacheHitImagePath) {
-    & $pythonExe $mainPy @forwardArgs
+    $pythonArgs = @($forwardArgs)
+    if ($VerboseLog) {
+        $pythonArgs += "--verbose-log"
+    }
+    & $pythonExe $mainPy @pythonArgs
     if ($LASTEXITCODE -ne 0) {
         throw "main.py failed with exit code $LASTEXITCODE"
     }

@@ -23,6 +23,7 @@ class RunOptions:
     pitch_deg: float = 70.0
     roll_deg: float = 0.0
     ssaa_scale: int = 4
+    orientation_overlay_enabled: bool | None = None
     celestial_scale_enabled: bool | None = None
     dynamic_saturation: bool | None = None
     saturation_angular_blend: float | None = None
@@ -36,6 +37,7 @@ class RunOptions:
     center_body: str | None = None
     selection_expression: str | None = None
     bg_color: tuple[int, int, int] | None = None
+    verbose_log: bool = False
 
 
 def _parse_bool(value: str) -> bool:
@@ -90,6 +92,9 @@ def _apply_runtime_config(options: RunOptions) -> None:
     config.VIEW_PITCH_DEG = float(options.pitch_deg)
     config.VIEW_ROLL_DEG = float(options.roll_deg)
     config.SSAA_SCALE = max(1, int(options.ssaa_scale))
+    config.VERBOSE_LOG = bool(options.verbose_log)
+    if options.orientation_overlay_enabled is not None:
+        config.SHOW_ORIENTATION_OVERLAY = bool(options.orientation_overlay_enabled)
     if options.celestial_scale_enabled is not None:
         config.SHOW_CELESTIAL_SCALE = bool(options.celestial_scale_enabled)
     if options.dynamic_saturation is not None:
@@ -165,6 +170,7 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
         pitch_deg=args.pitch,
         roll_deg=args.roll,
         ssaa_scale=args.ssaa,
+        orientation_overlay_enabled=args.orientation_overlay,
         celestial_scale_enabled=args.celestial_scale,
         dynamic_saturation=args.dynamic_saturation,
         saturation_angular_blend=args.saturation_angular_blend,
@@ -178,6 +184,7 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
         center_body=args.center_body,
         selection_expression=args.selection,
         bg_color=args.bg_color,
+        verbose_log=args.verbose_log,
     )
 
 
@@ -191,6 +198,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--pitch", type=float, default=0.0, help="View pitch in degrees")
     parser.add_argument("--roll", type=float, default=0.0, help="View roll in degrees")
     parser.add_argument("--ssaa", type=int, default=4, help="SSAA scale")
+    parser.add_argument("--orientation-overlay", type=_parse_bool, default=None, help="Enable orientation overlay (True/False)")
     parser.add_argument("--celestial-scale", type=_parse_bool, default=False, help="Enable or disable celestial guide circles (True/False)",)
     parser.add_argument("--dynamic-saturation", type=_parse_bool, default=True, help="Use acceleration-based trail saturation (True/False). False forces saturation to 1.0",)
     parser.add_argument("--saturation-angular-blend", type=float, default=0.0, help="Saturation blend: 0.0=linear speed, 1.0=angular speed",)
@@ -204,6 +212,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--center-body", type=str, default="venus", help="Observer center body key (e.g. earth, sun, moon, mars)",)
     parser.add_argument("--selection", type=str, default='innerplanets', help="Body selection expression. Examples: 'planets AND moon', 'dwarf planets AND outer planets'. Sun is always included.",)
     parser.add_argument("--bg-color", type=_parse_color, default=None, help="Background color name or hex code (e.g. 'black' or '#ff00ff')")
+    parser.add_argument("--verbose-log", action="store_true", help="Enable verbose runtime logging")
     return parser.parse_args()
 
 

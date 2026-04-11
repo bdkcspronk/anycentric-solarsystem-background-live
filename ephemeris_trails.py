@@ -19,9 +19,15 @@ def effective_trail_days(at_time: datetime) -> float:
     return min(requested_days, available_days)
 
 
-def trail_sample_count(step_minutes: int, at_time: datetime) -> int:
+def trail_sample_count(step_minutes: int, at_time: datetime, body_name: str | None = None) -> int:
     step = max(1, int(step_minutes))
-    return max(2, int(effective_trail_days(at_time) * 24 * 60 / step) + 1)
+    days = effective_trail_days(at_time)
+    if body_name is not None:
+        key = str(body_name).strip().lower()
+        body_cap_days = config.BODY_TRAIL_MAX_DAYS.get(key)
+        if body_cap_days is not None:
+            days = min(days, max(1e-9, float(body_cap_days)))
+    return max(2, int(days * 24 * 60 / step) + 1)
 
 
 def align_time_to_step(utc_time: datetime, step_minutes: int) -> datetime:
