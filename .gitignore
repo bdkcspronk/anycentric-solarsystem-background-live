@@ -7,7 +7,7 @@ __pycache__/
 .vscode/
 
 # Generated image output
-geocentric.png
+wallpaper.png
 
 # Runtime/cache artifacts
 trail_cache.json
