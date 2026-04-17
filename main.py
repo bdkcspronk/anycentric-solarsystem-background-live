@@ -30,6 +30,7 @@ class RunOptions:
     brightness_angular_blend: float | None = None
     trail_base_resolution_factor: float | None = None
     trail_step_scale: float | None = None
+    trail_adaptive_max_segments_per_body: int | None = None
     orbit_radius_mode: str | None = None
     orbit_radius_power: float | None = None
     marker_size_mode: str | None = None
@@ -107,6 +108,8 @@ def _apply_runtime_config(options: RunOptions) -> None:
         config.set_trail_base_resolution_factor(float(options.trail_base_resolution_factor))
     if options.trail_step_scale is not None:
         config.set_trail_step_scale(float(options.trail_step_scale))
+    if options.trail_adaptive_max_segments_per_body is not None:
+        config.TRAIL_ADAPTIVE_MAX_SEGMENTS_PER_BODY = max(1, int(options.trail_adaptive_max_segments_per_body))
     if options.orbit_radius_mode is not None:
         config.ORBIT_RADIUS_MODE = str(options.orbit_radius_mode).strip().lower()
     if options.orbit_radius_power is not None:
@@ -177,6 +180,7 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
         brightness_angular_blend=args.brightness_angular_blend,
         trail_base_resolution_factor=args.trail_base_resolution_factor,
         trail_step_scale=args.trail_step_scale,
+        trail_adaptive_max_segments_per_body=args.trail_adaptive_max_segments_per_body,
         orbit_radius_mode=args.orbit_radius_mode,
         orbit_radius_power=args.orbit_radius_power,
         marker_size_mode=args.marker_size_mode,
@@ -205,6 +209,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--brightness-angular-blend", type=float, default=0.5, help="Brightness blend: 0.0=linear speed, 1.0=angular speed",)
     parser.add_argument("--trail-base-resolution-factor", type=float, default=10, help="Base trail resolution factor in hours. Lower value means higher trail sampling resolution",)
     parser.add_argument("--trail-step-scale", type=float, default=1.0, help="Trail scale factor: sets TRAIL_DAYS=365.25*BODY_SOLAR_YEAR_FACTOR[center]*scale and scales trail step minutes for all bodies",)
+    parser.add_argument(
+        "--trail-adaptive-max-segments-per-body",
+        type=int,
+        default=None,
+        help="Override TRAIL_ADAPTIVE_MAX_SEGMENTS_PER_BODY at runtime",
+    )
     parser.add_argument("--orbit-radius-mode", type=str, default='power', help="Orbit radius remap mode: linear, sqrt, log, power",)
     parser.add_argument("--orbit-radius-power", type=float, default=0.5, help="Exponent used when orbit radius mode is power",)
     parser.add_argument("--marker-size-mode", type=str, choices=("linear", "angular"), default=None, help="Marker size mode: linear (radius) or angular (apparent size from center body)",)

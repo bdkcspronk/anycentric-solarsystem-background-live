@@ -106,6 +106,27 @@ Optional: run `main.py` directly while the venv is active for faster iteration:
 .venv\Scripts\python.exe main.py --glow True --labels True --width 2560 --height 1440
 ```
 
+## Blender workflow
+
+The project renderer is Pillow-based. To render the same ephemeris/trails in Blender, use the included export/import bridge scripts.
+
+1. Export a Blender scene JSON from this project:
+
+```powershell
+.venv\Scripts\python.exe blender/export_blender_scene.py --output blender/blender_scene.json --center-body earth --selection "innerplanets AND outerplanets AND dwarfplanets" --yaw 10 --pitch 35 --roll 0
+```
+
+2. Render in Blender (headless):
+
+```powershell
+blender --background --python blender/blender_render_scene.py -- --scene-json blender/blender_scene.json --output blender/blender_render.png
+```
+
+Notes:
+- `blender/export_blender_scene.py` computes observer-centered AU positions and trails using your existing ephemeris/cache pipeline.
+- `blender/blender_render_scene.py` creates emissive body spheres and curve trails, then renders a still PNG.
+- Use `--au-scale`, `--body-radius-scale`, and `--trail-width` on the Blender script to tune scene scale and readability.
+
 ## Install or update the scheduler (dry-run)
 
 ```powershell
